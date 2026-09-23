@@ -1,0 +1,6 @@
+{
+  "name": "Index Utilități",
+  "description": "Transmitere index gaze și curent prin secvență apel IVR automată, notificări lunare, grafice de consum, cost estimativ și export PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

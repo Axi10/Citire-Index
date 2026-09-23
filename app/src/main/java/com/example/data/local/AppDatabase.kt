@@ -9,9 +9,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.MeterReading
 import com.example.data.model.UtilityConfig
 import com.example.data.model.UtilityType
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 @Database(
     entities = [MeterReading::class, UtilityConfig::class],
@@ -33,7 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "meter_readings_v5.db"
+                    "meter_readings_v6.db"
                 )
                     .addCallback(DatabaseCallback())
                     .fallbackToDestructiveMigration()
@@ -68,54 +65,54 @@ abstract class AppDatabase : RoomDatabase() {
 
                 // 2. Inserare Curent (5174, 5215, 5270, 5350, 5397)
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('ELECTRICITY', 5174.0, NULL, 0.0, 1.64, 0.0, $fourMonthsAgo, 1, '')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('ELECTRICITY', 5174.0, NULL, 0.0, 1.64, 0.0, $fourMonthsAgo, '', 1, '')
                 """.trimIndent())
 
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('ELECTRICITY', 5215.0, 5174.0, 41.0, 1.64, 67.24, $threeMonthsAgo, 1, '')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('ELECTRICITY', 5215.0, 5174.0, 41.0, 1.64, 67.24, $threeMonthsAgo, '', 1, '')
                 """.trimIndent())
 
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('ELECTRICITY', 5270.0, 5215.0, 55.0, 1.64, 90.20, $twoMonthsAgo, 1, '')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('ELECTRICITY', 5270.0, 5215.0, 55.0, 1.64, 90.20, $twoMonthsAgo, '', 1, '')
                 """.trimIndent())
 
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('ELECTRICITY', 5350.0, 5270.0, 80.0, 1.64, 131.20, $oneMonthAgo, 1, '')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('ELECTRICITY', 5350.0, 5270.0, 80.0, 1.64, 131.20, $oneMonthAgo, '', 1, '')
                 """.trimIndent())
 
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('ELECTRICITY', 5397.0, 5350.0, 47.0, 1.64, 77.08, $now, 1, 'Transmis astăzi la robot')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('ELECTRICITY', 5397.0, 5350.0, 47.0, 1.64, 77.08, $now, '', 1, 'Transmis astăzi la robot')
                 """.trimIndent())
 
                 // 3. Inserare Gaz (2886, 2889, 2892, 2896, 2899)
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('GAS', 2886.0, NULL, 0.0, 3.02, 0.0, $fourMonthsAgo, 1, '')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('GAS', 2886.0, NULL, 0.0, 3.02, 0.0, $fourMonthsAgo, '', 1, '')
                 """.trimIndent())
 
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('GAS', 2889.0, 2886.0, 3.0, 3.02, 9.06, $threeMonthsAgo, 1, '')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('GAS', 2889.0, 2886.0, 3.0, 3.02, 9.06, $threeMonthsAgo, '', 1, '')
                 """.trimIndent())
 
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('GAS', 2892.0, 2889.0, 3.0, 3.02, 9.06, $twoMonthsAgo, 1, '')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('GAS', 2892.0, 2889.0, 3.0, 3.02, 9.06, $twoMonthsAgo, '', 1, '')
                 """.trimIndent())
 
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('GAS', 2896.0, 2892.0, 4.0, 3.02, 12.08, $oneMonthAgo, 1, '')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('GAS', 2896.0, 2892.0, 4.0, 3.02, 12.08, $oneMonthAgo, '', 1, '')
                 """.trimIndent())
 
                 db.execSQL("""
-                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, isCallExecuted, notes)
-                    VALUES ('GAS', 2899.0, 2896.0, 3.0, 3.02, 9.06, $sevenDaysAgo, 1, 'Transmis la robot')
+                    INSERT INTO meter_readings (utilityType, indexValue, previousIndexValue, consumption, unitPrice, estimatedCost, timestamp, callSequenceUsed, isCallExecuted, notes)
+                    VALUES ('GAS', 2899.0, 2896.0, 3.0, 3.02, 9.06, $sevenDaysAgo, '', 1, 'Transmis la robot')
                 """.trimIndent())
             }
         }

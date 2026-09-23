@@ -189,7 +189,7 @@ fun PdfReportsScreen(
 
         // 3. Report Preview KPIs
         Text(
-            text = "Previzualizare Conținut Raport ($periodLabel)",
+            text = "Sumar $periodLabel",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
@@ -218,7 +218,7 @@ fun PdfReportsScreen(
 
             MetricCard(
                 title = "Total General",
-                value = String.format(Locale.US, "%.2f L", totalCost),
+                value = String.format(Locale.US, "%.2f LEI", totalCost),
                 subtitle = "${periodReadings.size} citiri",
                 icon = Icons.Default.Paid,
                 accentColor = CostGreen,
@@ -226,36 +226,14 @@ fun PdfReportsScreen(
             )
         }
 
-        // 4. Report Specifications Checklist
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "Ce include raportul generat:",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
+        Spacer(modifier = Modifier.height(8.dp))
 
-                PdfFeatureItem(text = "Tabel comparativ cu data citirii, utilitatea și indexul transmis")
-                PdfFeatureItem(text = "Diferența de consum (Δ) și calculul costului estimat în LEI")
-                PdfFeatureItem(text = "Confirmarea apelului telefonic IVR efectuat pe contor")
-                PdfFeatureItem(text = "Codurile de client (NLC) și numerele TelVerde înregistrate")
-                PdfFeatureItem(text = "Format standard A4 cu antet și total general de plată")
-            }
-        }
-
-        // 5. Generate Button
+        // 4. Generate Button
         Button(
             onClick = { onExportPdf(periodLabel) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp)
+                .height(52.dp)
                 .testTag("generate_pdf_button"),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
@@ -288,23 +266,5 @@ fun PdfReportsScreen(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
-    }
-}
-
-@Composable
-private fun PdfFeatureItem(text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            imageVector = Icons.Default.CheckCircle,
-            contentDescription = null,
-            tint = CostGreen,
-            modifier = Modifier.size(16.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = text,
-            fontSize = 12.5.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }

@@ -48,7 +48,7 @@ object ReminderScheduler {
             val rMonth = readingCal.get(Calendar.MONTH)
             val diffDays = ((now.timeInMillis - latestReadingTimestamp) / (24L * 3600 * 1000)).toInt()
 
-            if ((rYear == currentYear && rMonth == currentMonth) || diffDays <= 18) {
+            if ((rYear == currentYear && rMonth == currentMonth) || diffDays <= 25) {
                 isSubmittedThisCycle = true
             }
         }

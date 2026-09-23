@@ -65,7 +65,7 @@ fun HistoryScreen(
     modifier: Modifier = Modifier
 ) {
     // Strictly separated: Either GAS or ELECTRICITY (no combined view)
-    var selectedUtility by remember { mutableStateOf(UtilityType.GAS) }
+    var selectedUtility by remember { mutableStateOf(UtilityType.ELECTRICITY) }
     var readingToEdit by remember { mutableStateOf<MeterReading?>(null) }
 
     val filteredReadings = remember(readings, selectedUtility) {

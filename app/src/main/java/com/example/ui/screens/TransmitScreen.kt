@@ -245,7 +245,7 @@ fun TransmitScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Introducere Index Nou",
+                        text = "Index Nou",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -269,8 +269,8 @@ fun TransmitScreen(
                 OutlinedTextField(
                     value = indexInput,
                     onValueChange = onIndexChanged,
-                    label = { Text("Valoare Index Contor (${activeUtility.unit})") },
-                    placeholder = { Text(if (latestReading != null) "Ex: ${(latestReading.indexValue + 15).toInt()}" else "Ex: 1250") },
+                    label = { Text("Index (${activeUtility.unit})") },
+                    placeholder = { Text("0") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = isNegativeIndex,
@@ -293,7 +293,7 @@ fun TransmitScreen(
                         Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Indexul este mai mic decât ultimul (${prevIndexVal?.toInt()} ${activeUtility.unit})!",
+                            text = "Index mai mic decât precedentul!",
                             color = MaterialTheme.colorScheme.error,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -304,7 +304,7 @@ fun TransmitScreen(
                         Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = Color(0xFFE65100), modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Consum neobișnuit de mare (+${consumption.toInt()} ${activeUtility.unit}). Verifică cifrele!",
+                            text = "Consum mare (+${consumption.toInt()} ${activeUtility.unit}). Verifică!",
                             color = Color(0xFFE65100),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -328,7 +328,7 @@ fun TransmitScreen(
                         )
 
                         MetricCard(
-                            title = "Cost Estimat",
+                            title = "Cost",
                             value = String.format(Locale.US, "%.2f LEI", estimatedCost),
                             subtitle = "${String.format(Locale.US, "%.2f", unitPrice)} lei/${activeUtility.unit}",
                             icon = Icons.Default.Paid,
@@ -342,7 +342,7 @@ fun TransmitScreen(
                 OutlinedTextField(
                     value = notesInput,
                     onValueChange = onNotesChanged,
-                    label = { Text("Notă opțională (ex: index vacanță)") },
+                    label = { Text("Notă (opțional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp)
@@ -375,7 +375,7 @@ fun TransmitScreen(
                 Icon(imageVector = Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Transmite Index (Apelează Robotul)",
+                    text = "Transmite (Apelează)",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -392,7 +392,7 @@ fun TransmitScreen(
             ) {
                 Icon(imageVector = Icons.Default.BookmarkBorder, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Salvează doar în istoric (fără apel)", fontSize = 13.sp)
+                Text("Doar salvează", fontSize = 13.sp)
             }
         }
 

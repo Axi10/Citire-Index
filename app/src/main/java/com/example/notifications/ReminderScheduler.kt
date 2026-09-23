@@ -9,6 +9,12 @@ import android.provider.Settings
 import com.example.data.model.UtilityType
 import java.util.Calendar
 
+data class SubmissionPeriodStatus(
+    val isSubmittedForCurrentCycle: Boolean,
+    val displayBadge: String,
+    val daysUntilNext: Int
+)
+
 object ReminderScheduler {
 
     fun getDaysUntilNextSubmission(targetDayOfMonth: Int): Int {
@@ -21,6 +27,67 @@ object ReminderScheduler {
             // Days remaining in this month + target day in next month
             val maxDayThisMonth = now.getActualMaximum(Calendar.DAY_OF_MONTH)
             (maxDayThisMonth - currentDay) + targetDayOfMonth
+        }
+    }
+
+    /**
+     * Determines whether the reading was already transmitted for the current month/cycle.
+     * If already submitted (e.g. today or recently this month), the countdown automatically
+     * resets to the target day of NEXT month!
+     */
+    fun getSubmissionStatus(targetDayOfMonth: Int, latestReadingTimestamp: Long?): SubmissionPeriodStatus {
+        val now = Calendar.getInstance()
+        val currentYear = now.get(Calendar.YEAR)
+        val currentMonth = now.get(Calendar.MONTH)
+        val currentDay = now.get(Calendar.DAY_OF_MONTH)
+
+        var isSubmittedThisCycle = false
+        if (latestReadingTimestamp != null && latestReadingTimestamp > 0) {
+            val readingCal = Calendar.getInstance().apply { timeInMillis = latestReadingTimestamp }
+            val rYear = readingCal.get(Calendar.YEAR)
+            val rMonth = readingCal.get(Calendar.MONTH)
+            val diffDays = ((now.timeInMillis - latestReadingTimestamp) / (24L * 3600 * 1000)).toInt()
+
+            if ((rYear == currentYear && rMonth == currentMonth) || diffDays <= 18) {
+                isSubmittedThisCycle = true
+            }
+        }
+
+        if (isSubmittedThisCycle) {
+            val nextMonthCal = Calendar.getInstance().apply {
+                set(Calendar.DAY_OF_MONTH, 1)
+                add(Calendar.MONTH, 1)
+                val maxDaysInNext = getActualMaximum(Calendar.DAY_OF_MONTH)
+                set(Calendar.DAY_OF_MONTH, targetDayOfMonth.coerceAtMost(maxDaysInNext))
+            }
+            val daysUntilNextMonthTarget = ((nextMonthCal.timeInMillis - now.timeInMillis) / (24L * 3600 * 1000)).toInt().coerceAtLeast(1)
+            val monthNames = arrayOf("Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Noi", "Dec")
+            val nextMonthName = monthNames[nextMonthCal.get(Calendar.MONTH)]
+
+            return SubmissionPeriodStatus(
+                isSubmittedForCurrentCycle = true,
+                displayBadge = "✅ Transmis luna aceasta • Următorul: $targetDayOfMonth $nextMonthName (peste $daysUntilNextMonthTarget zile)",
+                daysUntilNext = daysUntilNextMonthTarget
+            )
+        } else {
+            val daysUntil = if (currentDay <= targetDayOfMonth) {
+                targetDayOfMonth - currentDay
+            } else {
+                val maxDayThisMonth = now.getActualMaximum(Calendar.DAY_OF_MONTH)
+                (maxDayThisMonth - currentDay) + targetDayOfMonth
+            }
+
+            val badge = if (daysUntil == 0) {
+                "⚠️ Transmite azi ($targetDayOfMonth ale lunii)!"
+            } else {
+                "Peste $daysUntil zile ($targetDayOfMonth ale lunii)"
+            }
+
+            return SubmissionPeriodStatus(
+                isSubmittedForCurrentCycle = false,
+                displayBadge = badge,
+                daysUntilNext = daysUntil
+            )
         }
     }
 

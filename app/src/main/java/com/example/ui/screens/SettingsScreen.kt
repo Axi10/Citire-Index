@@ -22,18 +22,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -52,14 +47,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.UtilityConfig
 import com.example.data.model.UtilityType
-import com.example.telecom.CallHelper
 import com.example.telecom.CallLogHelper
 import com.example.ui.theme.ElectricityAmber
 import com.example.ui.theme.GasCyan
@@ -76,9 +69,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    var showAdvancedType by remember { mutableStateOf<UtilityType?>(null) }
+    var configToEdit by remember { mutableStateOf<UtilityType?>(null) }
 
-    // System Permissions launchers
     val notifPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { /* Handled */ }
@@ -89,27 +81,16 @@ fun SettingsScreen(
 
     val hasCallLogPermission = CallLogHelper.hasCallLogPermission(context)
 
-    // Advanced dialog for editing IVR template and testing call up to index
-    showAdvancedType?.let { type ->
+    // Edit Dialog (Only opens when user explicitly taps "Modifică")
+    configToEdit?.let { type ->
         val currentCfg = if (type == UtilityType.GAS) gasConfig else electricityConfig
-        AdvancedIvrSettingsDialog(
+        EditConfigModal(
             type = type,
-            currentTemplate = currentCfg?.ivrTemplate ?: type.defaultIvrTemplate,
-            onDismiss = { showAdvancedType = null },
-            onSaveTemplate = { newTemplate ->
-                val base = currentCfg ?: UtilityConfig(
-                    utilityType = type,
-                    phoneNumber = type.defaultPhone,
-                    clientCode = type.defaultClientCode,
-                    ivrTemplate = newTemplate,
-                    unitPrice = type.defaultPrice,
-                    reminderDayOfMonth = type.defaultDay
-                )
-                onSaveConfig(base.copy(ivrTemplate = newTemplate))
-                showAdvancedType = null
-            },
-            onTestCall = { direct ->
-                onTestCall(type, direct)
+            currentConfig = currentCfg,
+            onDismiss = { configToEdit = null },
+            onSave = { updated ->
+                onSaveConfig(updated)
+                configToEdit = null
             }
         )
     }
@@ -119,9 +100,27 @@ fun SettingsScreen(
             .fillMaxSize()
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // System Permissions Card (Notifications & Call Log Duration)
+        // Card 1: Gas Summary Card
+        MinimalUtilityCard(
+            type = UtilityType.GAS,
+            config = gasConfig,
+            accentColor = GasCyan,
+            icon = Icons.Default.LocalFireDepartment,
+            onEdit = { configToEdit = UtilityType.GAS }
+        )
+
+        // Card 2: Electricity Summary Card
+        MinimalUtilityCard(
+            type = UtilityType.ELECTRICITY,
+            config = electricityConfig,
+            accentColor = ElectricityAmber,
+            icon = Icons.Default.ElectricBolt,
+            onEdit = { configToEdit = UtilityType.ELECTRICITY }
+        )
+
+        // Card 3: Permissions
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -129,7 +128,7 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Permisiuni Sistem",
+                    text = "Permisiuni",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -140,10 +139,10 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(imageVector = Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(imageVector = Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Alerte Lunare (16 și 24)", fontSize = 12.5.sp)
+                            Text("Alerte lunare", fontSize = 12.sp)
                         }
                         OutlinedButton(
                             onClick = { notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
@@ -159,13 +158,10 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Icon(imageVector = Icons.Default.Call, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text("Detectare Durată Apel", fontSize = 12.5.sp)
-                            Text("Citește dacă apelul a durat destul", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                        Text("Detectare durată apel", fontSize = 12.sp)
                     }
                     if (!hasCallLogPermission) {
                         OutlinedButton(
@@ -175,10 +171,7 @@ fun SettingsScreen(
                             Text("Permite", fontSize = 11.sp)
                         }
                     } else {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFFE8F5E9)
-                        ) {
+                        Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFFE8F5E9)) {
                             Text(
                                 text = "Activat",
                                 color = Color(0xFF2E7D32),
@@ -191,61 +184,34 @@ fun SettingsScreen(
                 }
             }
         }
-
-        // Section 1: Gas Settings
-        CleanUtilityCard(
-            type = UtilityType.GAS,
-            currentConfig = gasConfig,
-            accentColor = GasCyan,
-            icon = Icons.Default.LocalFireDepartment,
-            onSave = onSaveConfig,
-            onTestNotification = { onTestNotification(UtilityType.GAS) },
-            onOpenAdvanced = { showAdvancedType = UtilityType.GAS }
-        )
-
-        // Section 2: Electricity Settings
-        CleanUtilityCard(
-            type = UtilityType.ELECTRICITY,
-            currentConfig = electricityConfig,
-            accentColor = ElectricityAmber,
-            icon = Icons.Default.ElectricBolt,
-            onSave = onSaveConfig,
-            onTestNotification = { onTestNotification(UtilityType.ELECTRICITY) },
-            onOpenAdvanced = { showAdvancedType = UtilityType.ELECTRICITY }
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
     }
 }
 
 @Composable
-private fun CleanUtilityCard(
+private fun MinimalUtilityCard(
     type: UtilityType,
-    currentConfig: UtilityConfig?,
+    config: UtilityConfig?,
     accentColor: Color,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onSave: (UtilityConfig) -> Unit,
-    onTestNotification: () -> Unit,
-    onOpenAdvanced: () -> Unit
+    onEdit: () -> Unit
 ) {
-    var phone by remember(currentConfig) { mutableStateOf(currentConfig?.phoneNumber ?: type.defaultPhone) }
-    var clientCode by remember(currentConfig) { mutableStateOf(currentConfig?.clientCode ?: type.defaultClientCode) }
-    var price by remember(currentConfig) { mutableStateOf((currentConfig?.unitPrice ?: type.defaultPrice).toString()) }
-    var reminderDay by remember(currentConfig) { mutableStateOf((currentConfig?.reminderDayOfMonth ?: type.defaultDay).toString()) }
+    val price = config?.unitPrice ?: type.defaultPrice
+    val day = config?.reminderDayOfMonth ?: type.defaultDay
+    val code = config?.clientCode ?: type.defaultClientCode
+    val phone = config?.phoneNumber ?: type.defaultPhone
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -254,201 +220,144 @@ private fun CleanUtilityCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(30.dp)
                             .background(accentColor.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
+                        Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Configurare ${type.title}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = type.title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
                     )
                 }
 
                 OutlinedButton(
-                    onClick = {
-                        phone = type.defaultPhone
-                        clientCode = type.defaultClientCode
-                        price = type.defaultPrice.toString()
-                        reminderDay = type.defaultDay.toString()
-                    },
+                    onClick = onEdit,
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Reset", fontSize = 11.sp)
+                    Text("Modifică", fontSize = 11.5.sp)
                 }
             }
 
             HorizontalDivider()
 
-            // Inputs: Client Code and Phone
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                OutlinedTextField(
-                    value = clientCode,
-                    onValueChange = { clientCode = it },
-                    label = { Text("Cod Client / NLC") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1.1f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    shape = RoundedCornerShape(10.dp)
-                )
-
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it },
-                    label = { Text("Număr TelVerde") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    shape = RoundedCornerShape(10.dp)
-                )
-            }
-
-            // Inputs: Price and Notification Day
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(
-                    value = price,
-                    onValueChange = { price = it },
-                    label = { Text("Preț (lei/${type.unit})") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    shape = RoundedCornerShape(10.dp)
-                )
-
-                OutlinedTextField(
-                    value = reminderDay,
-                    onValueChange = { reminderDay = it },
-                    label = { Text("Zi alertă (1-31)") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    shape = RoundedCornerShape(10.dp)
-                )
-            }
-
-            // Action row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onTestNotification,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Test Alertă", fontSize = 11.5.sp)
+                Column {
+                    Text("Preț unitar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("$price lei/${type.unit}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
 
-                Button(
-                    onClick = {
-                        val parsedPrice = price.toDoubleOrNull() ?: type.defaultPrice
-                        val parsedDay = reminderDay.toIntOrNull()?.coerceIn(1, 31) ?: type.defaultDay
-                        val updated = (currentConfig ?: UtilityConfig(
-                            utilityType = type,
-                            phoneNumber = phone,
-                            clientCode = clientCode,
-                            ivrTemplate = type.defaultIvrTemplate,
-                            unitPrice = parsedPrice,
-                            reminderDayOfMonth = parsedDay
-                        )).copy(
-                            phoneNumber = phone,
-                            clientCode = clientCode,
-                            unitPrice = parsedPrice,
-                            reminderDayOfMonth = parsedDay
-                        )
-                        onSave(updated)
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = accentColor)
-                ) {
-                    Icon(imageVector = Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Salvează", fontSize = 12.sp, color = Color.White)
+                Column {
+                    Text("Zi notificare", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("$day ale lunii", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
-            }
 
-            // Discreet Advanced Options Button (Hidden unless user explicitly clicks)
-            OutlinedButton(
-                onClick = onOpenAdvanced,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(imageVector = Icons.Default.Build, contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Opțiuni Avansate & Test Secvență Robot", fontSize = 11.5.sp)
+                Column {
+                    Text("Cod Client", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(code, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                Column {
+                    Text("TelVerde", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(phone, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun AdvancedIvrSettingsDialog(
+private fun EditConfigModal(
     type: UtilityType,
-    currentTemplate: String,
+    currentConfig: UtilityConfig?,
     onDismiss: () -> Unit,
-    onSaveTemplate: (String) -> Unit,
-    onTestCall: (direct: Boolean) -> Unit
+    onSave: (UtilityConfig) -> Unit
 ) {
-    var templateText by remember { mutableStateOf(currentTemplate) }
+    var priceText by remember { mutableStateOf((currentConfig?.unitPrice ?: type.defaultPrice).toString()) }
+    var dayText by remember { mutableStateOf((currentConfig?.reminderDayOfMonth ?: type.defaultDay).toString()) }
+    var codeText by remember { mutableStateOf(currentConfig?.clientCode ?: type.defaultClientCode) }
+    var phoneText by remember { mutableStateOf(currentConfig?.phoneNumber ?: type.defaultPhone) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Setări Avansate Robot (${type.title})",
+                text = "Modificare Setări ${type.title}",
                 fontWeight = FontWeight.Bold,
                 fontSize = 17.sp
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Aici poți modifica secvența telefonică trimisă către robot (unde XXXX este indexul). Modifică doar dacă furnizorul a schimbat meniul telefonic.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
                 OutlinedTextField(
-                    value = templateText,
-                    onValueChange = { templateText = it },
-                    label = { Text("Secvență IVR") },
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    value = priceText,
+                    onValueChange = { priceText = it },
+                    label = { Text("Preț (lei/${type.unit})") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Test button up to index
-                Button(
-                    onClick = { onTestCall(true) },
+                OutlinedTextField(
+                    value = dayText,
+                    onValueChange = { dayText = it },
+                    label = { Text("Zi notificare lunară (1-31)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(imageVector = Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Testează Apelul (Stop la cerere index)", fontSize = 12.sp)
-                }
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                OutlinedTextField(
+                    value = codeText,
+                    onValueChange = { codeText = it },
+                    label = { Text("Cod Client") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                OutlinedTextField(
+                    value = phoneText,
+                    onValueChange = { phoneText = it },
+                    label = { Text("Număr TelVerde") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onSaveTemplate(templateText) },
+                onClick = {
+                    val p = priceText.toDoubleOrNull() ?: type.defaultPrice
+                    val d = dayText.toIntOrNull()?.coerceIn(1, 31) ?: type.defaultDay
+                    val updated = (currentConfig ?: UtilityConfig(
+                        utilityType = type,
+                        phoneNumber = phoneText,
+                        clientCode = codeText,
+                        ivrTemplate = type.defaultIvrTemplate,
+                        unitPrice = p,
+                        reminderDayOfMonth = d
+                    )).copy(
+                        phoneNumber = phoneText,
+                        clientCode = codeText,
+                        unitPrice = p,
+                        reminderDayOfMonth = d
+                    )
+                    onSave(updated)
+                },
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Salvează")
@@ -456,7 +365,7 @@ private fun AdvancedIvrSettingsDialog(
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(8.dp)) {
-                Text("Închide")
+                Text("Anulează")
             }
         }
     )

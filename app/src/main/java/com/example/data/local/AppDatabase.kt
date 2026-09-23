@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 
 @Database(
     entities = [MeterReading::class, UtilityConfig::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -53,16 +53,25 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
+            override fun onDestructiveMigration(db: SupportSQLiteDatabase) {
+                super.onDestructiveMigration(db)
+                INSTANCE?.let { database ->
+                    CoroutineScope(Dispatchers.IO).launch {
+                        populateInitialConfigs(database.configDao(), database.meterDao())
+                    }
+                }
+            }
+
             private suspend fun populateInitialConfigs(configDao: ConfigDao, meterDao: MeterDao) {
-                // Initial configs for Gas and Electricity
+                // Initial configs for Gas and Electricity with user's exact rates
                 configDao.saveConfig(
                     UtilityConfig(
                         utilityType = UtilityType.GAS,
                         phoneNumber = UtilityType.GAS.defaultPhone,
                         clientCode = UtilityType.GAS.defaultClientCode,
                         ivrTemplate = UtilityType.GAS.defaultIvrTemplate,
-                        unitPrice = UtilityType.GAS.defaultPrice,
-                        reminderDayOfMonth = UtilityType.GAS.defaultDay,
+                        unitPrice = 3.02,
+                        reminderDayOfMonth = 16,
                         reminderHour = 9,
                         reminderMinute = 0,
                         isReminderEnabled = true
@@ -75,76 +84,164 @@ abstract class AppDatabase : RoomDatabase() {
                         phoneNumber = UtilityType.ELECTRICITY.defaultPhone,
                         clientCode = UtilityType.ELECTRICITY.defaultClientCode,
                         ivrTemplate = UtilityType.ELECTRICITY.defaultIvrTemplate,
-                        unitPrice = UtilityType.ELECTRICITY.defaultPrice,
-                        reminderDayOfMonth = UtilityType.ELECTRICITY.defaultDay,
+                        unitPrice = 1.64,
+                        reminderDayOfMonth = 24,
                         reminderHour = 9,
                         reminderMinute = 0,
                         isReminderEnabled = true
                     )
                 )
 
-                // Populate a couple of realistic previous readings so history and charts have rich initial context
+                val dayMs = 24L * 3600 * 1000
                 val now = System.currentTimeMillis()
-                val oneMonthAgo = now - 30L * 24 * 3600 * 1000
-                val twoMonthsAgo = now - 60L * 24 * 3600 * 1000
+                val fourMonthsAgo = now - 120L * dayMs
+                val threeMonthsAgo = now - 90L * dayMs
+                val twoMonthsAgo = now - 60L * dayMs
+                val oneMonthAgo = now - 30L * dayMs
 
-                // Gas historical readings
-                meterDao.insertReading(
-                    MeterReading(
-                        utilityType = UtilityType.GAS,
-                        indexValue = 1420.0,
-                        previousIndexValue = 1380.0,
-                        consumption = 40.0,
-                        unitPrice = 0.31,
-                        estimatedCost = 40.0 * 0.31,
-                        timestamp = twoMonthsAgo,
-                        callSequenceUsed = "0800800200,3730081#,,,1420#,,1",
-                        isCallExecuted = true,
-                        notes = "Citire index vară"
-                    )
-                )
-                meterDao.insertReading(
-                    MeterReading(
-                        utilityType = UtilityType.GAS,
-                        indexValue = 1465.0,
-                        previousIndexValue = 1420.0,
-                        consumption = 45.0,
-                        unitPrice = 0.31,
-                        estimatedCost = 45.0 * 0.31,
-                        timestamp = oneMonthAgo,
-                        callSequenceUsed = "0800800200,3730081#,,,1465#,,1",
-                        isCallExecuted = true,
-                        notes = "Transmitere automată"
-                    )
-                )
-
-                // Electricity historical readings
+                // ============================================
+                // CURENT (Indexuri: 5174, 5215, 5270, 5350, 5397 | Preț: 1.64 lei/kWh)
+                // ============================================
                 meterDao.insertReading(
                     MeterReading(
                         utilityType = UtilityType.ELECTRICITY,
-                        indexValue = 5120.0,
-                        previousIndexValue = 4980.0,
-                        consumption = 140.0,
-                        unitPrice = 0.80,
-                        estimatedCost = 140.0 * 0.80,
-                        timestamp = twoMonthsAgo,
-                        callSequenceUsed = "0800070701,1,,111192991#,,,1,,,,,5120#,,1",
+                        indexValue = 5174.0,
+                        previousIndexValue = null,
+                        consumption = 0.0,
+                        unitPrice = 1.64,
+                        estimatedCost = 0.0,
+                        timestamp = fourMonthsAgo,
                         isCallExecuted = true,
-                        notes = "Citire precedentă"
+                        notes = "Citire inițială"
                     )
                 )
+
                 meterDao.insertReading(
                     MeterReading(
                         utilityType = UtilityType.ELECTRICITY,
-                        indexValue = 5275.0,
-                        previousIndexValue = 5120.0,
-                        consumption = 155.0,
-                        unitPrice = 0.80,
-                        estimatedCost = 155.0 * 0.80,
-                        timestamp = oneMonthAgo,
-                        callSequenceUsed = "0800070701,1,,111192991#,,,1,,,,,5275#,,1",
+                        indexValue = 5215.0,
+                        previousIndexValue = 5174.0,
+                        consumption = 41.0,
+                        unitPrice = 1.64,
+                        estimatedCost = 41.0 * 1.64,
+                        timestamp = threeMonthsAgo,
                         isCallExecuted = true,
-                        notes = "Transmitere automată Curent"
+                        notes = "Transmitere lunară curent"
+                    )
+                )
+
+                meterDao.insertReading(
+                    MeterReading(
+                        utilityType = UtilityType.ELECTRICITY,
+                        indexValue = 5270.0,
+                        previousIndexValue = 5215.0,
+                        consumption = 55.0,
+                        unitPrice = 1.64,
+                        estimatedCost = 55.0 * 1.64,
+                        timestamp = twoMonthsAgo,
+                        isCallExecuted = true,
+                        notes = "Transmitere lunară curent"
+                    )
+                )
+
+                meterDao.insertReading(
+                    MeterReading(
+                        utilityType = UtilityType.ELECTRICITY,
+                        indexValue = 5350.0,
+                        previousIndexValue = 5270.0,
+                        consumption = 80.0,
+                        unitPrice = 1.64,
+                        estimatedCost = 80.0 * 1.64,
+                        timestamp = oneMonthAgo,
+                        isCallExecuted = true,
+                        notes = "Transmitere lunară curent"
+                    )
+                )
+
+                meterDao.insertReading(
+                    MeterReading(
+                        utilityType = UtilityType.ELECTRICITY,
+                        indexValue = 5397.0,
+                        previousIndexValue = 5350.0,
+                        consumption = 47.0,
+                        unitPrice = 1.64,
+                        estimatedCost = 47.0 * 1.64,
+                        timestamp = now,
+                        isCallExecuted = true,
+                        notes = "Transmis astăzi la robot (23 Septembrie)"
+                    )
+                )
+
+                // ============================================
+                // GAZ (Indexuri: 2886, 2889, 2892, 2896, 2899 | Preț: 3.02 lei/m³)
+                // ============================================
+                meterDao.insertReading(
+                    MeterReading(
+                        utilityType = UtilityType.GAS,
+                        indexValue = 2886.0,
+                        previousIndexValue = null,
+                        consumption = 0.0,
+                        unitPrice = 3.02,
+                        estimatedCost = 0.0,
+                        timestamp = fourMonthsAgo,
+                        isCallExecuted = true,
+                        notes = "Citire inițială"
+                    )
+                )
+
+                meterDao.insertReading(
+                    MeterReading(
+                        utilityType = UtilityType.GAS,
+                        indexValue = 2889.0,
+                        previousIndexValue = 2886.0,
+                        consumption = 3.0,
+                        unitPrice = 3.02,
+                        estimatedCost = 3.0 * 3.02,
+                        timestamp = threeMonthsAgo,
+                        isCallExecuted = true,
+                        notes = "Transmitere lunară gaz"
+                    )
+                )
+
+                meterDao.insertReading(
+                    MeterReading(
+                        utilityType = UtilityType.GAS,
+                        indexValue = 2892.0,
+                        previousIndexValue = 2889.0,
+                        consumption = 3.0,
+                        unitPrice = 3.02,
+                        estimatedCost = 3.0 * 3.02,
+                        timestamp = twoMonthsAgo,
+                        isCallExecuted = true,
+                        notes = "Transmitere lunară gaz"
+                    )
+                )
+
+                meterDao.insertReading(
+                    MeterReading(
+                        utilityType = UtilityType.GAS,
+                        indexValue = 2896.0,
+                        previousIndexValue = 2892.0,
+                        consumption = 4.0,
+                        unitPrice = 3.02,
+                        estimatedCost = 4.0 * 3.02,
+                        timestamp = oneMonthAgo,
+                        isCallExecuted = true,
+                        notes = "Transmitere lunară gaz"
+                    )
+                )
+
+                meterDao.insertReading(
+                    MeterReading(
+                        utilityType = UtilityType.GAS,
+                        indexValue = 2899.0,
+                        previousIndexValue = 2896.0,
+                        consumption = 3.0,
+                        unitPrice = 3.02,
+                        estimatedCost = 3.0 * 3.02,
+                        timestamp = now - 5L * dayMs,
+                        isCallExecuted = true,
+                        notes = "Ultima transmitere gaz"
                     )
                 )
             }

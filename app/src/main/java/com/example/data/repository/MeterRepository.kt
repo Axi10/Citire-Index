@@ -31,6 +31,9 @@ class MeterRepository(
     suspend fun deleteById(id: Long) =
         meterDao.deleteById(id)
 
+    suspend fun deleteAllReadings() =
+        meterDao.deleteAllReadings()
+
     suspend fun updateReading(reading: MeterReading) =
         meterDao.updateReading(reading)
 

@@ -110,9 +110,9 @@ fun TransmitScreen(
     }
 
     val accentColor = if (activeUtility == UtilityType.GAS) GasCyan else ElectricityAmber
-    val daysRemaining = remember(activeUtility, config) {
+    val submissionStatus = remember(activeUtility, config, latestReading) {
         val targetDay = config?.reminderDayOfMonth ?: activeUtility.defaultDay
-        ReminderScheduler.getDaysUntilNextSubmission(targetDay)
+        ReminderScheduler.getSubmissionStatus(targetDay, latestReading?.timestamp)
     }
 
     val currentIndexVal = indexInput.toDoubleOrNull() ?: 0.0
@@ -210,15 +210,16 @@ fun TransmitScreen(
                     )
                 }
 
+                val badgeColor = if (submissionStatus.isSubmittedForCurrentCycle) CostGreen else accentColor
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = accentColor.copy(alpha = 0.15f)
+                    color = badgeColor.copy(alpha = 0.15f)
                 ) {
                     Text(
-                        text = if (daysRemaining == 0) "Transmite azi!" else "Peste $daysRemaining zile (${config?.reminderDayOfMonth ?: activeUtility.defaultDay} ale lunii)",
+                        text = submissionStatus.displayBadge,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = accentColor,
+                        color = badgeColor,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }

@@ -17,7 +17,7 @@ enum class UtilityType(
         defaultPhone = "0800800200",
         defaultClientCode = "3730081",
         defaultIvrTemplate = "0800800200,3730081#,,,XXXX#,,1",
-        defaultPrice = 0.31,
+        defaultPrice = 3.02,
         description = "Transmitere index lunar gaz (recomandat pe 16 ale lunii)"
     ),
     ELECTRICITY(
@@ -27,7 +27,7 @@ enum class UtilityType(
         defaultPhone = "0800070701",
         defaultClientCode = "111192991",
         defaultIvrTemplate = "0800070701,1,,111192991#,,,1,,,,,XXXX#,,1",
-        defaultPrice = 0.80,
+        defaultPrice = 1.64,
         description = "Transmitere index lunar energie electrică (recomandat pe 24 ale lunii)"
     )
 }

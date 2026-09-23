@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,14 +22,11 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ElectricBolt
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Paid
-import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -65,27 +64,23 @@ fun HistoryScreen(
     onUpdateReading: (MeterReading) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedFilter by remember { mutableStateOf<UtilityType?>(null) }
+    // Strictly separated: Either GAS or ELECTRICITY (no combined view)
+    var selectedUtility by remember { mutableStateOf(UtilityType.GAS) }
     var readingToEdit by remember { mutableStateOf<MeterReading?>(null) }
 
-    val filteredReadings = remember(readings, selectedFilter) {
-        if (selectedFilter == null) readings else readings.filter { it.utilityType == selectedFilter }
+    val filteredReadings = remember(readings, selectedUtility) {
+        readings.filter { it.utilityType == selectedUtility }
     }
 
-    val totalGasCost = remember(readings) {
-        readings.filter { it.utilityType == UtilityType.GAS }.sumOf { it.estimatedCost }
+    val totalCost = remember(filteredReadings) {
+        filteredReadings.sumOf { it.estimatedCost }
     }
-    val totalElecCost = remember(readings) {
-        readings.filter { it.utilityType == UtilityType.ELECTRICITY }.sumOf { it.estimatedCost }
-    }
-    val totalCost = totalGasCost + totalElecCost
 
-    val totalGasCons = remember(readings) {
-        readings.filter { it.utilityType == UtilityType.GAS }.sumOf { it.consumption }
+    val totalConsumption = remember(filteredReadings) {
+        filteredReadings.sumOf { it.consumption }
     }
-    val totalElecCons = remember(readings) {
-        readings.filter { it.utilityType == UtilityType.ELECTRICITY }.sumOf { it.consumption }
-    }
+
+    val accentColor = if (selectedUtility == UtilityType.GAS) GasCyan else ElectricityAmber
 
     // Edit Reading Dialog
     readingToEdit?.let { reading ->
@@ -105,88 +100,119 @@ fun HistoryScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Filter Chips
+        // 1. Clear Tab Switcher: GAZ vs. CURENT (No combined view)
         item {
-            Row(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
             ) {
-                FilterChip(
-                    selected = selectedFilter == null,
-                    onClick = { selectedFilter = null },
-                    label = { Text("Toate (${readings.size})") },
-                    leadingIcon = {
-                        Icon(imageVector = Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(4.dp)
+                ) {
+                    val isGas = selectedUtility == UtilityType.GAS
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { selectedUtility = UtilityType.GAS },
+                        color = if (isGas) GasCyan else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocalFireDepartment,
+                                contentDescription = null,
+                                tint = if (isGas) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Istoric GAZ",
+                                fontWeight = if (isGas) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 13.5.sp,
+                                color = if (isGas) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                )
 
-                FilterChip(
-                    selected = selectedFilter == UtilityType.GAS,
-                    onClick = { selectedFilter = UtilityType.GAS },
-                    label = { Text("Gaz") },
-                    leadingIcon = {
-                        Icon(imageVector = Icons.Default.LocalFireDepartment, contentDescription = null, tint = GasCyan, modifier = Modifier.size(16.dp))
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = GasCyan.copy(alpha = 0.2f),
-                        selectedLabelColor = GasCyan
-                    )
-                )
-
-                FilterChip(
-                    selected = selectedFilter == UtilityType.ELECTRICITY,
-                    onClick = { selectedFilter = UtilityType.ELECTRICITY },
-                    label = { Text("Curent") },
-                    leadingIcon = {
-                        Icon(imageVector = Icons.Default.ElectricBolt, contentDescription = null, tint = ElectricityAmber, modifier = Modifier.size(16.dp))
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = ElectricityAmber.copy(alpha = 0.2f),
-                        selectedLabelColor = ElectricityAmber
-                    )
-                )
+                    val isElec = selectedUtility == UtilityType.ELECTRICITY
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { selectedUtility = UtilityType.ELECTRICITY },
+                        color = if (isElec) ElectricityAmber else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ElectricBolt,
+                                contentDescription = null,
+                                tint = if (isElec) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Istoric CURENT",
+                                fontWeight = if (isElec) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 13.5.sp,
+                                color = if (isElec) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        // 2. Metrics Overview Cards
+        // 2. Metrics for Selected Utility Only
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 MetricCard(
-                    title = "Cost Total",
-                    value = String.format(Locale.US, "%.2f LEI", totalCost),
-                    subtitle = "Gaz: ${String.format(Locale.US, "%.0f", totalGasCost)} | Curent: ${String.format(Locale.US, "%.0f", totalElecCost)}",
-                    icon = Icons.Default.Paid,
-                    accentColor = CostGreen,
+                    title = "Consum ${selectedUtility.title}",
+                    value = "${String.format(Locale.US, "%.1f", totalConsumption)} ${selectedUtility.unit}",
+                    subtitle = "${filteredReadings.size} citiri înregistrate",
+                    icon = Icons.Default.Speed,
+                    accentColor = accentColor,
                     modifier = Modifier.weight(1f)
                 )
 
                 MetricCard(
-                    title = "Consum Total",
-                    value = "${String.format(Locale.US, "%.0f", totalGasCons)} m³",
-                    subtitle = "Curent: ${String.format(Locale.US, "%.0f", totalElecCons)} kWh",
-                    icon = Icons.Default.TrendingUp,
-                    accentColor = if (selectedFilter == UtilityType.ELECTRICITY) ElectricityAmber else GasCyan,
+                    title = "Cost Total ${selectedUtility.title}",
+                    value = String.format(Locale.US, "%.2f LEI", totalCost),
+                    subtitle = "Tarif: ${if (selectedUtility == UtilityType.GAS) "3.02 lei/m³" else "1.64 lei/kWh"}",
+                    icon = Icons.Default.Paid,
+                    accentColor = CostGreen,
                     modifier = Modifier.weight(1f)
                 )
             }
         }
 
-        // 3. Trend Visualizer Chart
+        // 3. Evolution Chart for Selected Utility Only
         item {
             ConsumptionChart(
-                readings = readings,
-                selectedType = selectedFilter
+                readings = filteredReadings,
+                selectedType = selectedUtility
             )
         }
 
-        // 4. History List Header
+        // 4. Readings List Header
         item {
             Text(
-                text = "Istoric Înregistrări & Transmiteri",
+                text = "Citiri ${selectedUtility.title}",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 4.dp)
@@ -205,7 +231,7 @@ fun HistoryScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Nu există citiri înregistrate pentru această selecție.",
+                            text = "Nu există citiri înregistrate pentru ${selectedUtility.title}.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -250,7 +276,7 @@ private fun ReadingItemCard(
                 .fillMaxWidth()
                 .padding(14.dp)
         ) {
-            // Header: Type, Date, Edit & Delete buttons
+            // Header: Date, Edit & Delete buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -259,7 +285,7 @@ private fun ReadingItemCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(30.dp)
                             .background(accentColor.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
@@ -267,23 +293,16 @@ private fun ReadingItemCard(
                             imageVector = if (isGas) Icons.Default.LocalFireDepartment else Icons.Default.ElectricBolt,
                             contentDescription = null,
                             tint = accentColor,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = reading.utilityType.title,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = dateFormat.format(Date(reading.timestamp)),
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        text = dateFormat.format(Date(reading.timestamp)),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -295,7 +314,7 @@ private fun ReadingItemCard(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Editează",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(2.dp))
@@ -307,7 +326,7 @@ private fun ReadingItemCard(
                             imageVector = Icons.Default.DeleteOutline,
                             contentDescription = "Șterge",
                             tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
                 }
@@ -323,7 +342,7 @@ private fun ReadingItemCard(
             ) {
                 Column {
                     Text(
-                        text = "Index Transmis",
+                        text = "Index",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -337,7 +356,7 @@ private fun ReadingItemCard(
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Consum (Δ)",
+                        text = "Consum",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -351,7 +370,7 @@ private fun ReadingItemCard(
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "Cost Estimat",
+                        text = "Cost",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -364,7 +383,7 @@ private fun ReadingItemCard(
                 }
             }
 
-            // Optional notes or transmission tag
+            // Optional note or call tag
             if (reading.notes.isNotBlank() || reading.isCallExecuted) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
@@ -393,12 +412,12 @@ private fun ReadingItemCard(
                                     imageVector = Icons.Default.Call,
                                     contentDescription = null,
                                     tint = CostGreen,
-                                    modifier = Modifier.size(12.dp)
+                                    modifier = Modifier.size(11.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Apel realizat",
-                                    fontSize = 10.5.sp,
+                                    text = "Apelat",
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = CostGreen
                                 )

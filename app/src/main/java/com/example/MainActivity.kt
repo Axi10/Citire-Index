@@ -99,6 +99,20 @@ fun MainScreen(viewModel: MainViewModel) {
     val electricityConfig by viewModel.electricityConfig.collectAsStateWithLifecycle()
     val lastGeneratedPdf by viewModel.generatedPdf.collectAsStateWithLifecycle()
     val userMessage by viewModel.userMessage.collectAsStateWithLifecycle()
+    val callEvaluation by viewModel.lastCallEvaluation.collectAsStateWithLifecycle()
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.verifyCallOutcome(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     LaunchedEffect(userMessage) {
         userMessage?.let {
@@ -183,16 +197,20 @@ fun MainScreen(viewModel: MainViewModel) {
                     latestReading = currentLatestReading,
                     indexInput = indexInput,
                     notesInput = notesInput,
+                    callEvaluation = callEvaluation,
                     onUtilitySelected = { viewModel.selectUtility(it) },
                     onIndexChanged = { viewModel.updateIndexInput(it) },
                     onNotesChanged = { viewModel.updateNotesInput(it) },
                     onTransmitAndCall = { directCall -> viewModel.transmitAndCall(context, directCall) },
-                    onSaveOnly = { viewModel.saveReadingOnly() }
+                    onSaveOnly = { viewModel.saveReadingOnly() },
+                    onUndoLastReading = { viewModel.undoLastReading() },
+                    onDismissCallEvaluation = { viewModel.clearLastCallEvaluation() }
                 )
 
                 1 -> HistoryScreen(
                     readings = allReadings,
-                    onDeleteReading = { viewModel.deleteReading(it) }
+                    onDeleteReading = { viewModel.deleteReading(it) },
+                    onUpdateReading = { viewModel.updateReading(it) }
                 )
 
                 2 -> PdfReportsScreen(

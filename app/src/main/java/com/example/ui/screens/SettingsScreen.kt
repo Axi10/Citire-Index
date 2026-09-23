@@ -4,7 +4,6 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,17 +22,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ElectricBolt
-import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -54,7 +52,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -63,8 +60,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.UtilityConfig
 import com.example.data.model.UtilityType
 import com.example.telecom.CallHelper
-import com.example.telecom.IvrSequenceBuilder
-import com.example.ui.theme.CostGreen
+import com.example.telecom.CallLogHelper
 import com.example.ui.theme.ElectricityAmber
 import com.example.ui.theme.GasCyan
 
@@ -80,33 +76,42 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    // Notification permission launcher for Android 13+
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { /* Permission handled */ }
+    var showAdvancedType by remember { mutableStateOf<UtilityType?>(null) }
 
-    // Phone call permission launcher for direct test calls
-    var pendingTestUtility by remember { mutableStateOf<UtilityType?>(null) }
-    val callPermissionLauncher = rememberLauncherForActivityResult(
+    // System Permissions launchers
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        pendingTestUtility?.let { type ->
-            onTestCall(type, isGranted)
-            pendingTestUtility = null
-        }
-    }
+    ) { /* Handled */ }
 
-    val launchTestCall: (UtilityType, Boolean) -> Unit = { type, direct ->
-        if (direct) {
-            if (CallHelper.hasCallPermission(context)) {
-                onTestCall(type, true)
-            } else {
-                pendingTestUtility = type
-                callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+    val callLogPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* Handled */ }
+
+    val hasCallLogPermission = CallLogHelper.hasCallLogPermission(context)
+
+    // Advanced dialog for editing IVR template and testing call up to index
+    showAdvancedType?.let { type ->
+        val currentCfg = if (type == UtilityType.GAS) gasConfig else electricityConfig
+        AdvancedIvrSettingsDialog(
+            type = type,
+            currentTemplate = currentCfg?.ivrTemplate ?: type.defaultIvrTemplate,
+            onDismiss = { showAdvancedType = null },
+            onSaveTemplate = { newTemplate ->
+                val base = currentCfg ?: UtilityConfig(
+                    utilityType = type,
+                    phoneNumber = type.defaultPhone,
+                    clientCode = type.defaultClientCode,
+                    ivrTemplate = newTemplate,
+                    unitPrice = type.defaultPrice,
+                    reminderDayOfMonth = type.defaultDay
+                )
+                onSaveConfig(base.copy(ivrTemplate = newTemplate))
+                showAdvancedType = null
+            },
+            onTestCall = { direct ->
+                onTestCall(type, direct)
             }
-        } else {
-            onTestCall(type, false)
-        }
+        )
     }
 
     Column(
@@ -114,338 +119,117 @@ fun SettingsScreen(
             .fillMaxSize()
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Notification permission banner if on Android 13+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
+        // System Permissions Card (Notifications & Call Log Duration)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Permisiuni Sistem",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(imageVector = Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Alerte Lunare (16 și 24)", fontSize = 12.5.sp)
+                        }
+                        OutlinedButton(
+                            onClick = { notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Activează", fontSize = 11.sp)
+                        }
+                    }
+                }
+
                 Row(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.NotificationsActive,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Permisiune Notificări Lunare",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Activează notificările pentru a fi avertizat pe 16 (Gaz) și 24 (Curent).",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(imageVector = Icons.Default.Call, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("Detectare Durată Apel", fontSize = 12.5.sp)
+                            Text("Citește dacă apelul a durat destul", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                    Button(
-                        onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Activează", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-
-        // =========================================================================
-        // 🧪 SPECIAL TEST CALL SECTION: STOPS RIGHT BEFORE ENTERING THE METER INDEX
-        // =========================================================================
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("test_call_container_card"),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-            ),
-            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PhoneInTalk,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "🧪 Testare Apel Robotic (Fără Transmitere)",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Se oprește exact la pasul de introducere index",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    if (!hasCallLogPermission) {
+                        OutlinedButton(
+                            onClick = { callLogPermissionLauncher.launch(Manifest.permission.READ_CALL_LOG) },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Permite", fontSize = 11.sp)
+                        }
+                    } else {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFE8F5E9)
+                        ) {
+                            Text(
+                                text = "Activat",
+                                color = Color(0xFF2E7D32),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
-
-                Text(
-                    text = "Apasă butonul de test pentru a verifica apelarea și navigarea prin robot. Secvența rulează identic (număr, meniuri, cod client, pauze), dar se oprește exact când robotul solicită indexul contorului. Ascultă în apel dacă robotul îți cere indexul!",
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                // 1. GAZ TEST CALL CARD
-                val gasTemplate = gasConfig?.ivrTemplate ?: UtilityType.GAS.defaultIvrTemplate
-                val gasTestSeq = IvrSequenceBuilder.buildTestSequenceUntilIndex(gasTemplate)
-                TestCallUtilityBox(
-                    type = UtilityType.GAS,
-                    accentColor = GasCyan,
-                    icon = Icons.Default.LocalFireDepartment,
-                    testSequence = gasTestSeq,
-                    explanation = "Apelează 0800800200 -> trimite cod client ${gasConfig?.clientCode ?: UtilityType.GAS.defaultClientCode}# -> pauză -> se oprește la solicitarea indexului.",
-                    onDirectTest = { launchTestCall(UtilityType.GAS, true) },
-                    onDialerTest = { launchTestCall(UtilityType.GAS, false) }
-                )
-
-                // 2. ELECTRICITY TEST CALL CARD
-                val elecTemplate = electricityConfig?.ivrTemplate ?: UtilityType.ELECTRICITY.defaultIvrTemplate
-                val elecTestSeq = IvrSequenceBuilder.buildTestSequenceUntilIndex(elecTemplate)
-                TestCallUtilityBox(
-                    type = UtilityType.ELECTRICITY,
-                    accentColor = ElectricityAmber,
-                    icon = Icons.Default.ElectricBolt,
-                    testSequence = elecTestSeq,
-                    explanation = "Apelează 0800070701 -> tasta 1 -> cod client ${electricityConfig?.clientCode ?: UtilityType.ELECTRICITY.defaultClientCode}# -> tasta 1 -> pauză -> se oprește la solicitarea indexului.",
-                    onDirectTest = { launchTestCall(UtilityType.ELECTRICITY, true) },
-                    onDialerTest = { launchTestCall(UtilityType.ELECTRICITY, false) }
-                )
             }
         }
 
         // Section 1: Gas Settings
-        UtilityConfigEditorCard(
+        CleanUtilityCard(
             type = UtilityType.GAS,
             currentConfig = gasConfig,
             accentColor = GasCyan,
             icon = Icons.Default.LocalFireDepartment,
             onSave = onSaveConfig,
             onTestNotification = { onTestNotification(UtilityType.GAS) },
-            onTestCall = { direct -> launchTestCall(UtilityType.GAS, direct) }
+            onOpenAdvanced = { showAdvancedType = UtilityType.GAS }
         )
 
         // Section 2: Electricity Settings
-        UtilityConfigEditorCard(
+        CleanUtilityCard(
             type = UtilityType.ELECTRICITY,
             currentConfig = electricityConfig,
             accentColor = ElectricityAmber,
             icon = Icons.Default.ElectricBolt,
             onSave = onSaveConfig,
             onTestNotification = { onTestNotification(UtilityType.ELECTRICITY) },
-            onTestCall = { direct -> launchTestCall(UtilityType.ELECTRICITY, direct) }
+            onOpenAdvanced = { showAdvancedType = UtilityType.ELECTRICITY }
         )
 
-        // Section 3: Technical Architecture Explanation
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Arhitectură Apel Automat & Permisiuni",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Text(
-                    text = "• CALL_PHONE vs ACTION_DIAL: Aplicația folosește permisiunea standard Android 'android.permission.CALL_PHONE' pentru a declanșa apelul imediat la apăsarea butonului, fără să mai fie nevoie să deschizi tastatura și să apeși tu butonul 'Suna'.\n\n" +
-                            "• Pauze și tonuri DTMF: În secvența telecom, virgula (,) reprezintă o pauză de ~2.5 secunde. Modemul celular transmite în mod autonom codul clientului (#), indexul contorului (#) și tastele de confirmare (1).\n\n" +
-                            "• De ce apare ecranul de apel? Sistemul de operare Android garantează securitatea utilizatorului afișând interfața nativă în timpul oricărei convorbiri celulare. Nicio aplicație nu poate efectua apeluri complet ascunse fără ca utilizatorul să vadă că este conectat, însă întregul proces de tastare a indexului este 100% automatizat!",
-                    fontSize = 11.5.sp,
-                    lineHeight = 17.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
     }
 }
 
 @Composable
-private fun TestCallUtilityBox(
-    type: UtilityType,
-    accentColor: Color,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    testSequence: String,
-    explanation: String,
-    onDirectTest: () -> Unit,
-    onDialerTest: () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.3f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .background(accentColor.copy(alpha = 0.15f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Test Apel: ${type.title}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = accentColor.copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        text = "Stop la index",
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = accentColor,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-            }
-
-            // Sequence chip
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Secvență:",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = testSequence,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
-
-            Text(
-                text = explanation,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onDirectTest,
-                    modifier = Modifier
-                        .weight(1.3f)
-                        .height(44.dp)
-                        .testTag("test_call_direct_${type.name.lowercase()}"),
-                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "📞 Sună Acum (Test)",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onDialerTest,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Dialpad, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Tastatură", fontSize = 11.sp)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun UtilityConfigEditorCard(
+private fun CleanUtilityCard(
     type: UtilityType,
     currentConfig: UtilityConfig?,
     accentColor: Color,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onSave: (UtilityConfig) -> Unit,
     onTestNotification: () -> Unit,
-    onTestCall: (direct: Boolean) -> Unit
+    onOpenAdvanced: () -> Unit
 ) {
     var phone by remember(currentConfig) { mutableStateOf(currentConfig?.phoneNumber ?: type.defaultPhone) }
     var clientCode by remember(currentConfig) { mutableStateOf(currentConfig?.clientCode ?: type.defaultClientCode) }
-    var ivrTemplate by remember(currentConfig) { mutableStateOf(currentConfig?.ivrTemplate ?: type.defaultIvrTemplate) }
     var price by remember(currentConfig) { mutableStateOf((currentConfig?.unitPrice ?: type.defaultPrice).toString()) }
     var reminderDay by remember(currentConfig) { mutableStateOf((currentConfig?.reminderDayOfMonth ?: type.defaultDay).toString()) }
 
@@ -488,7 +272,6 @@ private fun UtilityConfigEditorCard(
                     onClick = {
                         phone = type.defaultPhone
                         clientCode = type.defaultClientCode
-                        ivrTemplate = type.defaultIvrTemplate
                         price = type.defaultPrice.toString()
                         reminderDay = type.defaultDay.toString()
                     },
@@ -496,17 +279,27 @@ private fun UtilityConfigEditorCard(
                 ) {
                     Icon(imageVector = Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Implicit", fontSize = 11.sp)
+                    Text("Reset", fontSize = 11.sp)
                 }
             }
 
             HorizontalDivider()
 
-            // Phone and Client Code
+            // Inputs: Client Code and Phone
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                OutlinedTextField(
+                    value = clientCode,
+                    onValueChange = { clientCode = it },
+                    label = { Text("Cod Client / NLC") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1.1f),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = RoundedCornerShape(10.dp)
+                )
+
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = it },
@@ -516,30 +309,9 @@ private fun UtilityConfigEditorCard(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     shape = RoundedCornerShape(10.dp)
                 )
-
-                OutlinedTextField(
-                    value = clientCode,
-                    onValueChange = { clientCode = it },
-                    label = { Text("Cod Client / NLC") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    shape = RoundedCornerShape(10.dp)
-                )
             }
 
-            // IVR Dial Template
-            OutlinedTextField(
-                value = ivrTemplate,
-                onValueChange = { ivrTemplate = it },
-                label = { Text("Secvență apel IVR (folosește XXXX pentru index)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                shape = RoundedCornerShape(10.dp)
-            )
-
-            // Price and Reminder Day
+            // Inputs: Price and Notification Day
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -557,7 +329,7 @@ private fun UtilityConfigEditorCard(
                 OutlinedTextField(
                     value = reminderDay,
                     onValueChange = { reminderDay = it },
-                    label = { Text("Zi notificare (1-31)") },
+                    label = { Text("Zi alertă (1-31)") },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -565,10 +337,10 @@ private fun UtilityConfigEditorCard(
                 )
             }
 
-            // Buttons: Test Notification & Save Config
+            // Action row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
                     onClick = onTestNotification,
@@ -576,34 +348,116 @@ private fun UtilityConfigEditorCard(
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Icon(imageVector = Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Testează Alerta", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Test Alertă", fontSize = 11.5.sp)
                 }
 
                 Button(
                     onClick = {
                         val parsedPrice = price.toDoubleOrNull() ?: type.defaultPrice
                         val parsedDay = reminderDay.toIntOrNull()?.coerceIn(1, 31) ?: type.defaultDay
-                        onSave(
-                            UtilityConfig(
-                                utilityType = type,
-                                phoneNumber = phone,
-                                clientCode = clientCode,
-                                ivrTemplate = ivrTemplate,
-                                unitPrice = parsedPrice,
-                                reminderDayOfMonth = parsedDay
-                            )
+                        val updated = (currentConfig ?: UtilityConfig(
+                            utilityType = type,
+                            phoneNumber = phone,
+                            clientCode = clientCode,
+                            ivrTemplate = type.defaultIvrTemplate,
+                            unitPrice = parsedPrice,
+                            reminderDayOfMonth = parsedDay
+                        )).copy(
+                            phoneNumber = phone,
+                            clientCode = clientCode,
+                            unitPrice = parsedPrice,
+                            reminderDayOfMonth = parsedDay
                         )
+                        onSave(updated)
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = accentColor)
                 ) {
                     Icon(imageVector = Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text("Salvează", fontSize = 12.sp, color = Color.White)
                 }
             }
+
+            // Discreet Advanced Options Button (Hidden unless user explicitly clicks)
+            OutlinedButton(
+                onClick = onOpenAdvanced,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(imageVector = Icons.Default.Build, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Opțiuni Avansate & Test Secvență Robot", fontSize = 11.5.sp)
+            }
         }
     }
+}
+
+@Composable
+private fun AdvancedIvrSettingsDialog(
+    type: UtilityType,
+    currentTemplate: String,
+    onDismiss: () -> Unit,
+    onSaveTemplate: (String) -> Unit,
+    onTestCall: (direct: Boolean) -> Unit
+) {
+    var templateText by remember { mutableStateOf(currentTemplate) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Setări Avansate Robot (${type.title})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Aici poți modifica secvența telefonică trimisă către robot (unde XXXX este indexul). Modifică doar dacă furnizorul a schimbat meniul telefonic.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = templateText,
+                    onValueChange = { templateText = it },
+                    label = { Text("Secvență IVR") },
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Test button up to index
+                Button(
+                    onClick = { onTestCall(true) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(imageVector = Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Testează Apelul (Stop la cerere index)", fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSaveTemplate(templateText) },
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Salvează")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(8.dp)) {
+                Text("Închide")
+            }
+        }
+    )
 }

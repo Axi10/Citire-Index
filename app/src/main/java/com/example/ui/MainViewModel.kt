@@ -13,6 +13,10 @@ import com.example.data.repository.MeterRepository
 import com.example.notifications.ReminderScheduler
 import com.example.pdf.PdfReportGenerator
 import com.example.telecom.CallHelper
+import com.example.telecom.CallLogEntry
+import com.example.telecom.CallLogHelper
+import com.example.telecom.CallStatusEvaluation
+import com.example.telecom.CallVerificationResult
 import com.example.telecom.IvrSequenceBuilder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -58,6 +62,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Generated PDF reports list
     private val _generatedPdf = MutableStateFlow<File?>(null)
     val generatedPdf: StateFlow<File?> = _generatedPdf.asStateFlow()
+
+    // Call Log tracking and verification
+    private var lastInitiatedReadingId: Long? = null
+    private var callInitiatedTimeMs: Long = 0L
+    private var lastInitiatedType: UtilityType? = null
+
+    private val _lastCallEvaluation = MutableStateFlow<CallVerificationResult?>(null)
+    val lastCallEvaluation: StateFlow<CallVerificationResult?> = _lastCallEvaluation.asStateFlow()
+
+    fun clearLastCallEvaluation() {
+        _lastCallEvaluation.value = null
+    }
 
     // Database flows
     val allReadings: StateFlow<List<MeterReading>> = repository.allReadings
@@ -180,7 +196,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 notes = _notesInput.value.ifBlank { "Transmitere automată prin IVR" }
             )
 
-            repository.insertReading(reading)
+            val insertedId = repository.insertReading(reading)
+            lastInitiatedReadingId = insertedId
+            callInitiatedTimeMs = System.currentTimeMillis()
+            lastInitiatedType = type
 
             if (directCall) {
                 val callStarted = CallHelper.makeDirectCall(context, dialSequence)
@@ -197,6 +216,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Clear inputs
             _indexInput.value = ""
             _notesInput.value = ""
+        }
+    }
+
+    fun updateReading(reading: MeterReading) {
+        viewModelScope.launch {
+            repository.updateReading(reading)
+            _userMessage.value = "Înregistrarea a fost actualizată!"
+        }
+    }
+
+    fun undoLastReading() {
+        val id = lastInitiatedReadingId ?: return
+        viewModelScope.launch {
+            repository.deleteById(id)
+            lastInitiatedReadingId = null
+            _lastCallEvaluation.value = null
+            _userMessage.value = "Ultimul index a fost anulat și șters din istoric."
+        }
+    }
+
+    /**
+     * Verifies the call outcome by inspecting the Android call log duration.
+     */
+    fun verifyCallOutcome(context: Context) {
+        if (callInitiatedTimeMs == 0L || lastInitiatedType == null) return
+
+        val type = lastInitiatedType ?: return
+        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
+        val expectedPhone = config?.phoneNumber ?: type.defaultPhone
+
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(1200)
+            val entry = CallLogHelper.checkLatestOutgoingCall(context, callInitiatedTimeMs, expectedPhone)
+            val result = CallLogHelper.evaluateCall(entry, type)
+            _lastCallEvaluation.value = result
+
+            if (result.status == CallStatusEvaluation.CANCELLED_OR_MISSED) {
+                _userMessage.value = "Apel anulat imediat (0s). Indexul nu a fost transmis!"
+            } else if (result.status == CallStatusEvaluation.CONFIRMED_SUCCESS) {
+                _userMessage.value = "Apel confirmat (${result.durationSeconds}s)! Indexul a fost transmis."
+            }
         }
     }
 

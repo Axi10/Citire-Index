@@ -85,11 +85,9 @@ fun TransmitScreen(
     config: UtilityConfig?,
     latestReading: MeterReading?,
     indexInput: String,
-    notesInput: String,
     callEvaluation: CallVerificationResult?,
     onUtilitySelected: (UtilityType) -> Unit,
     onIndexChanged: (String) -> Unit,
-    onNotesChanged: (String) -> Unit,
     onTransmitAndCall: (directCall: Boolean) -> Unit,
     onSaveOnly: () -> Unit,
     onUndoLastReading: () -> Unit,
@@ -337,16 +335,6 @@ fun TransmitScreen(
                         )
                     }
                 }
-
-                // Optional note field
-                OutlinedTextField(
-                    value = notesInput,
-                    onValueChange = onNotesChanged,
-                    label = { Text("Notă (opțional)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                )
             }
         }
 

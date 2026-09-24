@@ -36,7 +36,6 @@ fun EditReadingDialog(
     onSave: (MeterReading) -> Unit
 ) {
     var indexText by remember { mutableStateOf(reading.indexValue.toInt().toString()) }
-    var notesText by remember { mutableStateOf(reading.notes) }
 
     val newIndex = indexText.toDoubleOrNull()
     val prevIndex = reading.previousIndexValue
@@ -51,7 +50,7 @@ fun EditReadingDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Editare Citire ${reading.utilityType.title}",
+                text = "Editare Index ${reading.utilityType.title}",
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
@@ -93,15 +92,6 @@ fun EditReadingDialog(
                         )
                     }
                 }
-
-                OutlinedTextField(
-                    value = notesText,
-                    onValueChange = { notesText = it },
-                    label = { Text("Observații / Notă") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                )
             }
         },
         confirmButton = {
@@ -112,7 +102,7 @@ fun EditReadingDialog(
                             indexValue = newIndex,
                             consumption = newConsumption,
                             estimatedCost = newCost,
-                            notes = notesText
+                            notes = ""
                         )
                         onSave(updated)
                     }

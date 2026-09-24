@@ -63,14 +63,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5215.0, previousIndexValue = 5174.0, consumption = 41.0, unitPrice = 1.64, estimatedCost = 41.0 * 1.64, timestamp = threeMonthsAgo, isCallExecuted = true, notes = ""))
         repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5270.0, previousIndexValue = 5215.0, consumption = 55.0, unitPrice = 1.64, estimatedCost = 55.0 * 1.64, timestamp = twoMonthsAgo, isCallExecuted = true, notes = ""))
         repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5350.0, previousIndexValue = 5270.0, consumption = 80.0, unitPrice = 1.64, estimatedCost = 80.0 * 1.64, timestamp = oneMonthAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5397.0, previousIndexValue = 5350.0, consumption = 47.0, unitPrice = 1.64, estimatedCost = 47.0 * 1.64, timestamp = now, isCallExecuted = true, notes = "Transmis astăzi"))
+        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5397.0, previousIndexValue = 5350.0, consumption = 47.0, unitPrice = 1.64, estimatedCost = 47.0 * 1.64, timestamp = now, isCallExecuted = true, notes = ""))
 
         // Gaz (2886, 2889, 2892, 2896, 2899 | 3.02)
         repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2886.0, previousIndexValue = null, consumption = 0.0, unitPrice = 3.02, estimatedCost = 0.0, timestamp = fourMonthsAgo, isCallExecuted = true, notes = ""))
         repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2889.0, previousIndexValue = 2886.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = threeMonthsAgo, isCallExecuted = true, notes = ""))
         repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2892.0, previousIndexValue = 2889.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = twoMonthsAgo, isCallExecuted = true, notes = ""))
         repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2896.0, previousIndexValue = 2892.0, consumption = 4.0, unitPrice = 3.02, estimatedCost = 4.0 * 3.02, timestamp = oneMonthAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2899.0, previousIndexValue = 2896.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = sevenDaysAgo, isCallExecuted = true, notes = "Transmis la robot"))
+        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2899.0, previousIndexValue = 2896.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = sevenDaysAgo, isCallExecuted = true, notes = ""))
 
         repository.saveConfig(UtilityConfig(utilityType = UtilityType.GAS, phoneNumber = UtilityType.GAS.defaultPhone, clientCode = UtilityType.GAS.defaultClientCode, ivrTemplate = UtilityType.GAS.defaultIvrTemplate, unitPrice = 3.02, reminderDayOfMonth = 16))
         repository.saveConfig(UtilityConfig(utilityType = UtilityType.ELECTRICITY, phoneNumber = UtilityType.ELECTRICITY.defaultPhone, clientCode = UtilityType.ELECTRICITY.defaultClientCode, ivrTemplate = UtilityType.ELECTRICITY.defaultIvrTemplate, unitPrice = 1.64, reminderDayOfMonth = 24))
@@ -87,10 +87,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Meter Index Input
     private val _indexInput = MutableStateFlow("")
     val indexInput: StateFlow<String> = _indexInput.asStateFlow()
-
-    // Notes input for current transmission
-    private val _notesInput = MutableStateFlow("")
-    val notesInput: StateFlow<String> = _notesInput.asStateFlow()
 
     // User message / snackbar
     private val _userMessage = MutableStateFlow<String?>(null)
@@ -149,17 +145,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectUtility(type: UtilityType) {
         _activeUtility.value = type
         _indexInput.value = ""
-        _notesInput.value = ""
     }
 
     fun updateIndexInput(input: String) {
         // Allow digits and at most one decimal point
         val filtered = input.filter { it.isDigit() || it == '.' }
         _indexInput.value = filtered
-    }
-
-    fun updateNotesInput(notes: String) {
-        _notesInput.value = notes
     }
 
     fun clearUserMessage() {
@@ -230,7 +221,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 timestamp = System.currentTimeMillis(),
                 callSequenceUsed = dialSequence,
                 isCallExecuted = true,
-                notes = _notesInput.value.ifBlank { "Transmitere automată prin IVR" }
+                notes = ""
             )
 
             val insertedId = repository.insertReading(reading)
@@ -252,7 +243,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             // Clear inputs
             _indexInput.value = ""
-            _notesInput.value = ""
         }
     }
 
@@ -328,13 +318,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 timestamp = System.currentTimeMillis(),
                 callSequenceUsed = dialSequence,
                 isCallExecuted = false,
-                notes = _notesInput.value.ifBlank { "Salvare manuală" }
+                notes = ""
             )
 
             repository.insertReading(reading)
             _userMessage.value = "Indexul a fost salvat cu succes în istoric!"
             _indexInput.value = ""
-            _notesInput.value = ""
         }
     }
 

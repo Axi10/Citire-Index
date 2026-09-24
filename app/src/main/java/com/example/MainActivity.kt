@@ -93,7 +93,6 @@ fun MainScreen(viewModel: MainViewModel) {
     val currentConfig by viewModel.currentConfig.collectAsStateWithLifecycle()
     val currentLatestReading by viewModel.currentLatestReading.collectAsStateWithLifecycle()
     val indexInput by viewModel.indexInput.collectAsStateWithLifecycle()
-    val notesInput by viewModel.notesInput.collectAsStateWithLifecycle()
     val allReadings by viewModel.allReadings.collectAsStateWithLifecycle()
     val gasConfig by viewModel.gasConfig.collectAsStateWithLifecycle()
     val electricityConfig by viewModel.electricityConfig.collectAsStateWithLifecycle()
@@ -196,11 +195,9 @@ fun MainScreen(viewModel: MainViewModel) {
                     config = currentConfig,
                     latestReading = currentLatestReading,
                     indexInput = indexInput,
-                    notesInput = notesInput,
                     callEvaluation = callEvaluation,
                     onUtilitySelected = { viewModel.selectUtility(it) },
                     onIndexChanged = { viewModel.updateIndexInput(it) },
-                    onNotesChanged = { viewModel.updateNotesInput(it) },
                     onTransmitAndCall = { directCall -> viewModel.transmitAndCall(context, directCall) },
                     onSaveOnly = { viewModel.saveReadingOnly() },
                     onUndoLastReading = { viewModel.undoLastReading() },

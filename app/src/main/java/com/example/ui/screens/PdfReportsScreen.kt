@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,7 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -41,10 +43,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.MeterReading
@@ -106,7 +110,7 @@ fun PdfReportsScreen(
             .fillMaxSize()
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // 1. Header Card
         Card(
@@ -119,12 +123,12 @@ fun PdfReportsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(42.dp)
                         .background(MaterialTheme.colorScheme.primary, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
@@ -132,7 +136,7 @@ fun PdfReportsScreen(
                         imageVector = Icons.Default.PictureAsPdf,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
@@ -143,7 +147,7 @@ fun PdfReportsScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Generează document PDF imprimabil cu indecșii transmiși, consumul calculat și costul estimativ.",
+                        text = "Document A4 imprimabil cu indecșii transmiși, consumul și costul estimativ.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -151,43 +155,64 @@ fun PdfReportsScreen(
             }
         }
 
-        // 2. Period Selection Chips
+        // 2. Period Selection: Custom Segmented Control (no overflow, perfectly balanced)
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(12.dp)) {
                 Text(
                     text = "Alege Perioada pentru Raport:",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                Row(
+
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 ) {
-                    FilterChip(
-                        selected = selectedPeriodType == 0,
-                        onClick = { selectedPeriodType = 0 },
-                        label = { Text("Luna Curentă") }
-                    )
-                    FilterChip(
-                        selected = selectedPeriodType == 1,
-                        onClick = { selectedPeriodType = 1 },
-                        label = { Text("Ultimele 3 Luni") }
-                    )
-                    FilterChip(
-                        selected = selectedPeriodType == 2,
-                        onClick = { selectedPeriodType = 2 },
-                        label = { Text("Tot Istoricul") }
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(3.dp)
+                    ) {
+                        val options = listOf("Luna curentă", "Ultimele 3 luni", "Tot istoricul")
+                        options.forEachIndexed { index, title ->
+                            val isSelected = selectedPeriodType == index
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { selectedPeriodType = index },
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = title,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // 3. Report Preview KPIs
+        // 3. Report Preview KPIs (2 side-by-side cards + 1 full-width featured summary banner)
         Text(
             text = "Sumar $periodLabel",
             style = MaterialTheme.typography.titleMedium,
@@ -215,37 +240,174 @@ fun PdfReportsScreen(
                 accentColor = ElectricityAmber,
                 modifier = Modifier.weight(1f)
             )
-
-            MetricCard(
-                title = "Total General",
-                value = String.format(Locale.US, "%.2f LEI", totalCost),
-                subtitle = "${periodReadings.size} citiri",
-                icon = Icons.Default.Paid,
-                accentColor = CostGreen,
-                modifier = Modifier.weight(1f)
-            )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        // Prominent Total General Banner
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = CostGreen.copy(alpha = 0.08f)),
+            border = BorderStroke(1.dp, CostGreen.copy(alpha = 0.25f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(CostGreen.copy(alpha = 0.15f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Paid,
+                            contentDescription = null,
+                            tint = CostGreen,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Total General Estimativ",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${periodReadings.size} citiri înregistrate în perioadă",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Text(
+                    text = String.format(Locale.US, "%.2f LEI", totalCost),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = CostGreen
+                )
+            }
+        }
 
-        // 4. Generate Button
+        // 4. Live Preview of Readings included in the PDF
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Citiri incluse în raport (${periodReadings.size})",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Description,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (periodReadings.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Nu există citiri pentru perioada selectată.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    val previewFormat = SimpleDateFormat("dd MMM yyyy", Locale("ro", "RO"))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        periodReadings.take(5).forEach { item ->
+                            val isGas = item.utilityType == UtilityType.GAS
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = if (isGas) Icons.Default.LocalFireDepartment else Icons.Default.ElectricBolt,
+                                        contentDescription = null,
+                                        tint = if (isGas) GasCyan else ElectricityAmber,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "${if (isGas) "Gaz" else "Curent"} • ${previewFormat.format(Date(item.timestamp))}",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Text(
+                                    text = "${String.format(Locale.US, "%.0f", item.indexValue)} ${item.utilityType.unit} (${String.format(Locale.US, "%.2f", item.estimatedCost)} lei)",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        if (periodReadings.size > 5) {
+                            Text(
+                                text = "+ încă ${periodReadings.size - 5} citiri vor fi incluse în fișierul PDF complet",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Generate Button
         Button(
             onClick = { onExportPdf(periodLabel) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
+                .height(50.dp)
                 .testTag("generate_pdf_button"),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = Color.White
             )
         ) {
-            Icon(imageVector = Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(10.dp))
+            Icon(imageVector = Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(19.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "Generează și Trimite Raportul PDF",
-                fontSize = 15.sp,
+                fontSize = 14.5.sp,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -256,15 +418,15 @@ fun PdfReportsScreen(
                 onClick = { PdfReportGenerator.sharePdf(context, lastGeneratedFile) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(14.dp)
+                    .height(46.dp),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(17.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Re-trimite ultimul raport generat (${lastGeneratedFile.name.take(24)}...)", fontSize = 13.sp)
+                Text("Re-trimite ultimul raport (${lastGeneratedFile.name.take(22)}...)", fontSize = 12.5.sp)
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(10.dp))
     }
 }

@@ -16,6 +16,9 @@ class MeterRepository(
     fun getReadingsByType(type: UtilityType): Flow<List<MeterReading>> =
         meterDao.getReadingsByType(type)
 
+    suspend fun getReadingsByTypeAsc(type: UtilityType): List<MeterReading> =
+        meterDao.getReadingsByTypeAsc(type)
+
     fun getLatestReading(type: UtilityType): Flow<MeterReading?> =
         meterDao.getLatestReading(type)
 

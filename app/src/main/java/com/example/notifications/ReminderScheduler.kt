@@ -20,6 +20,16 @@ data class SubmissionPeriodStatus(
 
 object ReminderScheduler {
 
+    private const val DAY_MS = 24L * 3600 * 1000
+
+    // A reading counts for a due date if it was made in the 15 days before it (or later)
+    private const val SUBMISSION_WINDOW_DAYS = 15L
+
+    // How long after a missed due date we keep showing the "overdue" state
+    private const val OVERDUE_DAYS = 14
+
+    private val MONTH_NAMES = arrayOf("Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Noi", "Dec")
+
     fun getDaysUntilNextSubmission(targetDayOfMonth: Int): Int {
         val now = Calendar.getInstance()
         val currentDay = now.get(Calendar.DAY_OF_MONTH)
@@ -33,65 +43,90 @@ object ReminderScheduler {
         }
     }
 
+    /** Midnight of [day] in the given month (month may overflow, e.g. 12 = January next year). */
+    private fun dueDate(year: Int, month: Int, day: Int): Calendar =
+        Calendar.getInstance().apply {
+            clear()
+            set(year, month, 1, 0, 0, 0)
+            set(Calendar.DAY_OF_MONTH, day.coerceIn(1, getActualMaximum(Calendar.DAY_OF_MONTH)))
+        }
+
+    private fun daysBetween(from: Calendar, to: Calendar): Int =
+        Math.round((to.timeInMillis - from.timeInMillis) / DAY_MS.toDouble()).toInt()
+
+    private fun label(date: Calendar): String =
+        "${date.get(Calendar.DAY_OF_MONTH)} ${MONTH_NAMES[date.get(Calendar.MONTH)]}"
+
     /**
-     * Determines whether the reading was already transmitted for the current month/cycle.
-     * If already submitted (e.g. today or recently this month), the countdown automatically
-     * resets to the target day of NEXT month!
+     * Tells whether the index was already sent for the current cycle.
+     *
+     * The due date is the target day of the month. A reading counts for a due date when it was
+     * made at most 15 days before it, so an index sent on the 5th covers the 16th of the same
+     * month, while one sent on the 28th of last month does not.
      */
     fun getSubmissionStatus(targetDayOfMonth: Int, latestReadingTimestamp: Long?): SubmissionPeriodStatus {
-        val now = Calendar.getInstance()
-        val currentYear = now.get(Calendar.YEAR)
-        val currentMonth = now.get(Calendar.MONTH)
-        val currentDay = now.get(Calendar.DAY_OF_MONTH)
-
-        var isSubmittedThisCycle = false
-        if (latestReadingTimestamp != null && latestReadingTimestamp > 0) {
-            val readingCal = Calendar.getInstance().apply { timeInMillis = latestReadingTimestamp }
-            val rYear = readingCal.get(Calendar.YEAR)
-            val rMonth = readingCal.get(Calendar.MONTH)
-            val diffDays = ((now.timeInMillis - latestReadingTimestamp) / (24L * 3600 * 1000)).toInt()
-
-            if ((rYear == currentYear && rMonth == currentMonth) || diffDays <= 25) {
-                isSubmittedThisCycle = true
-            }
+        val today = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
         }
+        val year = today.get(Calendar.YEAR)
+        val month = today.get(Calendar.MONTH)
 
-        if (isSubmittedThisCycle) {
-            val nextMonthCal = Calendar.getInstance().apply {
-                set(Calendar.DAY_OF_MONTH, 1)
-                add(Calendar.MONTH, 1)
-                val maxDaysInNext = getActualMaximum(Calendar.DAY_OF_MONTH)
-                set(Calendar.DAY_OF_MONTH, targetDayOfMonth.coerceAtMost(maxDaysInNext))
-            }
-            val daysUntilNextMonthTarget = ((nextMonthCal.timeInMillis - now.timeInMillis) / (24L * 3600 * 1000)).toInt().coerceAtLeast(1)
-            val monthNames = arrayOf("Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Noi", "Dec")
-            val nextMonthName = monthNames[nextMonthCal.get(Calendar.MONTH)]
+        val dueThisMonth = dueDate(year, month, targetDayOfMonth)
+        val previousDue =
+            if (dueThisMonth.timeInMillis <= today.timeInMillis) dueThisMonth
+            else dueDate(year, month - 1, targetDayOfMonth)
+        val nextDue =
+            if (dueThisMonth.timeInMillis >= today.timeInMillis) dueThisMonth
+            else dueDate(year, month + 1, targetDayOfMonth)
 
+        fun covers(due: Calendar): Boolean =
+            latestReadingTimestamp != null && latestReadingTimestamp > 0 &&
+                latestReadingTimestamp >= due.timeInMillis - SUBMISSION_WINDOW_DAYS * DAY_MS
+
+        // Already sent for the upcoming due date: the next one is a month later
+        if (covers(nextDue)) {
+            val following = dueDate(nextDue.get(Calendar.YEAR), nextDue.get(Calendar.MONTH) + 1, targetDayOfMonth)
+            val days = daysBetween(today, following)
             return SubmissionPeriodStatus(
                 isSubmittedForCurrentCycle = true,
-                displayBadge = "✅ Transmis luna aceasta • Următorul: $targetDayOfMonth $nextMonthName (peste $daysUntilNextMonthTarget zile)",
-                daysUntilNext = daysUntilNextMonthTarget
-            )
-        } else {
-            val daysUntil = if (currentDay <= targetDayOfMonth) {
-                targetDayOfMonth - currentDay
-            } else {
-                val maxDayThisMonth = now.getActualMaximum(Calendar.DAY_OF_MONTH)
-                (maxDayThisMonth - currentDay) + targetDayOfMonth
-            }
-
-            val badge = if (daysUntil == 0) {
-                "⚠️ Transmite azi ($targetDayOfMonth ale lunii)!"
-            } else {
-                "Peste $daysUntil zile ($targetDayOfMonth ale lunii)"
-            }
-
-            return SubmissionPeriodStatus(
-                isSubmittedForCurrentCycle = false,
-                displayBadge = badge,
-                daysUntilNext = daysUntil
+                displayBadge = "✅ Transmis pentru ${label(nextDue)} • Următorul: ${label(following)} (peste $days zile)",
+                daysUntilNext = days
             )
         }
+
+        val daysToNext = daysBetween(today, nextDue)
+
+        // Sent for the most recent due date, nothing to do until the next one
+        if (covers(previousDue)) {
+            return SubmissionPeriodStatus(
+                isSubmittedForCurrentCycle = true,
+                displayBadge = "✅ Transmis luna aceasta • Următorul: ${label(nextDue)} (peste $daysToNext zile)",
+                daysUntilNext = daysToNext
+            )
+        }
+
+        val lateDays = daysBetween(previousDue, today)
+        if (lateDays in 1..OVERDUE_DAYS) {
+            return SubmissionPeriodStatus(
+                isSubmittedForCurrentCycle = false,
+                displayBadge = "⚠️ Întârziat cu $lateDays zile (termen: ${label(previousDue)}) • Transmite acum!",
+                daysUntilNext = daysToNext
+            )
+        }
+
+        val badge = if (daysToNext == 0) {
+            "⚠️ Transmite azi ($targetDayOfMonth ale lunii)!"
+        } else {
+            "Peste $daysToNext zile ($targetDayOfMonth ale lunii)"
+        }
+        return SubmissionPeriodStatus(
+            isSubmittedForCurrentCycle = false,
+            displayBadge = badge,
+            daysUntilNext = daysToNext
+        )
     }
 
     private fun requestCodeFor(type: UtilityType): Int = if (type == UtilityType.GAS) 201 else 202

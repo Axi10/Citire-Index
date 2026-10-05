@@ -16,6 +16,8 @@ import com.example.telecom.CallLogHelper
 import com.example.telecom.CallStatusEvaluation
 import com.example.telecom.CallVerificationResult
 import com.example.telecom.IvrSequenceBuilder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,9 +25,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    private companion object {
+        // How long we keep waiting for the call to show up in the call log
+        const val PENDING_CALL_TIMEOUT_MS = 10 * 60 * 1000L
+        const val MAX_INDEX_DIGITS = 9
+    }
 
     private val repository: MeterRepository = AppDatabase.getDatabase(application).let { database ->
         MeterRepository(database.meterDao(), database.configDao())
@@ -51,10 +60,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _generatedPdf = MutableStateFlow<File?>(null)
     val generatedPdf: StateFlow<File?> = _generatedPdf.asStateFlow()
 
-    // Call Log tracking and verification
+    // The reading created by the last transmit, so it can be undone
     private var lastInitiatedReadingId: Long? = null
+    private var lastInsertedType: UtilityType? = null
+
+    // Call verification: set when a call is requested, cleared once the call log was read
     private var callInitiatedTimeMs: Long = 0L
     private var lastInitiatedType: UtilityType? = null
+    private var verifying = false
 
     private val _lastCallEvaluation = MutableStateFlow<CallVerificationResult?>(null)
     val lastCallEvaluation: StateFlow<CallVerificationResult?> = _lastCallEvaluation.asStateFlow()
@@ -104,7 +117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateIndexInput(input: String) {
         // Meter indexes are sent to the IVR as whole numbers: digits only
-        _indexInput.value = input.filter { it.isDigit() }
+        _indexInput.value = input.filter { it.isDigit() }.take(MAX_INDEX_DIGITS)
     }
 
     fun clearUserMessage() {
@@ -155,7 +168,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val prevVal = prevReading?.indexValue
         if (prevVal != null && indexVal < prevVal) {
-            _userMessage.value = "Atenție: Indexul nou (${indexVal.toInt()}) este mai mic decât indexul anterior (${prevVal.toInt()})!"
+            _userMessage.value = "Atenție: Indexul nou (${indexVal.toLong()}) este mai mic decât indexul anterior (${prevVal.toLong()})!"
             return
         }
 
@@ -165,6 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val dialSequence = getFullDialString(type, config, _indexInput.value)
 
         viewModelScope.launch {
+            // Marked as called only once the call really starts (or the call log confirms it)
             val reading = MeterReading(
                 utilityType = type,
                 indexValue = indexVal,
@@ -174,18 +188,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 estimatedCost = estimatedCost,
                 timestamp = System.currentTimeMillis(),
                 callSequenceUsed = dialSequence,
-                isCallExecuted = true,
+                isCallExecuted = false,
                 notes = ""
             )
 
             val insertedId = repository.insertReading(reading)
             lastInitiatedReadingId = insertedId
+            lastInsertedType = type
             callInitiatedTimeMs = System.currentTimeMillis()
             lastInitiatedType = type
+            _lastCallEvaluation.value = null
 
             if (directCall) {
                 val callStarted = CallHelper.makeDirectCall(context, dialSequence)
                 if (callStarted) {
+                    repository.updateReading(reading.copy(id = insertedId, isCallExecuted = true))
                     _userMessage.value = "Apelul automat a fost inițiat! Robotul preia secvența."
                 } else {
                     _userMessage.value = "Deschidere în tastatură (permisiune apel necesară pentru apel direct)."
@@ -200,45 +217,107 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Recomputes previous index, consumption and cost for every reading of a utility,
+     * so that editing or deleting one reading never leaves its neighbours stale.
+     */
+    private suspend fun recalculateChain(type: UtilityType) {
+        var previous: Double? = null
+        for (item in repository.getReadingsByTypeAsc(type)) {
+            val consumption = if (previous != null) (item.indexValue - previous).coerceAtLeast(0.0) else 0.0
+            val fixed = item.copy(
+                previousIndexValue = previous,
+                consumption = consumption,
+                estimatedCost = consumption * item.unitPrice
+            )
+            if (fixed != item) repository.updateReading(fixed)
+            previous = item.indexValue
+        }
+    }
+
     fun updateReading(reading: MeterReading) {
         viewModelScope.launch {
             repository.updateReading(reading)
+            recalculateChain(reading.utilityType)
             _userMessage.value = "Înregistrarea a fost actualizată!"
         }
     }
 
     fun undoLastReading() {
         val id = lastInitiatedReadingId ?: return
+        val type = lastInsertedType
         viewModelScope.launch {
             repository.deleteById(id)
+            if (type != null) recalculateChain(type)
             lastInitiatedReadingId = null
+            lastInsertedType = null
             _lastCallEvaluation.value = null
             _userMessage.value = "Ultimul index a fost anulat și șters din istoric."
         }
     }
 
+    private suspend fun markLastReadingAsCalled(type: UtilityType) {
+        val id = lastInitiatedReadingId ?: return
+        val latest = repository.getLatestReadingSync(type) ?: return
+        if (latest.id == id && !latest.isCallExecuted) {
+            repository.updateReading(latest.copy(isCallExecuted = true))
+        }
+    }
+
     /**
      * Verifies the call outcome by inspecting the Android call log duration.
-     * The call log only tells us how long the call lasted, not whether the robot
-     * accepted the index, so the messages below are deliberately cautious.
+     * The call log is written when the call ends, so until then there is nothing to read
+     * and we simply keep waiting. Once a call that started after our request is found it is
+     * evaluated exactly once. The log only tells us how long the call lasted, not whether the
+     * robot accepted the index, so the messages are deliberately cautious.
      */
     fun verifyCallOutcome(context: Context) {
-        if (callInitiatedTimeMs == 0L || lastInitiatedType == null) return
+        val startedAt = callInitiatedTimeMs
+        val type = lastInitiatedType
+        if (startedAt == 0L || type == null || verifying) return
 
-        val type = lastInitiatedType ?: return
+        if (!CallLogHelper.hasCallLogPermission(context)) {
+            // Without the permission the outcome can never be read: stop waiting
+            callInitiatedTimeMs = 0L
+            lastInitiatedType = null
+            return
+        }
+
         val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
         val expectedPhone = config?.phoneNumber ?: type.defaultPhone
 
+        verifying = true
         viewModelScope.launch {
-            kotlinx.coroutines.delay(1200)
-            val entry = CallLogHelper.checkLatestOutgoingCall(context, callInitiatedTimeMs, expectedPhone)
-            val result = CallLogHelper.evaluateCall(entry, type)
-            _lastCallEvaluation.value = result
+            try {
+                delay(1200)
+                val entry = CallLogHelper.checkLatestOutgoingCall(context, startedAt, expectedPhone)
+                    ?.takeIf { it.date >= startedAt - 5_000L }
 
-            if (result.status == CallStatusEvaluation.CANCELLED_OR_MISSED) {
-                _userMessage.value = "Apel anulat imediat (0s). Indexul nu a fost transmis!"
-            } else if (result.status == CallStatusEvaluation.CONFIRMED_SUCCESS) {
-                _userMessage.value = "Apel de ${result.durationSeconds}s. Probabil transmis; robotul nu poate confirma automat."
+                if (entry == null) {
+                    if (System.currentTimeMillis() - startedAt > PENDING_CALL_TIMEOUT_MS) {
+                        callInitiatedTimeMs = 0L
+                        lastInitiatedType = null
+                    }
+                    return@launch
+                }
+
+                callInitiatedTimeMs = 0L
+                lastInitiatedType = null
+
+                val result = CallLogHelper.evaluateCall(entry, type)
+                _lastCallEvaluation.value = result
+
+                when (result.status) {
+                    CallStatusEvaluation.CANCELLED_OR_MISSED ->
+                        _userMessage.value = "Apel anulat imediat (0s). Indexul nu a fost transmis!"
+                    CallStatusEvaluation.CONFIRMED_SUCCESS -> {
+                        markLastReadingAsCalled(type)
+                        _userMessage.value = "Apel de ${result.durationSeconds}s. Probabil transmis; robotul nu poate confirma automat."
+                    }
+                    else -> Unit
+                }
+            } finally {
+                verifying = false
             }
         }
     }
@@ -258,7 +337,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val prevReading = if (type == UtilityType.GAS) latestGasReading.value else latestElectricityReading.value
 
         val prevVal = prevReading?.indexValue
-        val consumption = if (prevVal != null) (indexVal - prevVal).coerceAtLeast(0.0) else 0.0
+        if (prevVal != null && indexVal < prevVal) {
+            _userMessage.value = "Indexul nou (${indexVal.toLong()}) este mai mic decât cel anterior (${prevVal.toLong()}). Verifică contorul."
+            return
+        }
+
+        val consumption = if (prevVal != null) indexVal - prevVal else 0.0
         val price = config?.unitPrice ?: type.defaultPrice
         val estimatedCost = consumption * price
         val dialSequence = getFullDialString(type, config, _indexInput.value)
@@ -286,6 +370,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteReading(reading: MeterReading) {
         viewModelScope.launch {
             repository.deleteReading(reading)
+            recalculateChain(reading.utilityType)
             _userMessage.value = "Înregistrarea a fost ștearsă."
         }
     }
@@ -355,16 +440,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun exportPdfReport(context: Context, periodLabel: String) {
+    /**
+     * Generates the PDF for the readings made since [sinceMs] (all of them when null).
+     */
+    fun exportPdfReport(context: Context, periodLabel: String, sinceMs: Long?) {
         viewModelScope.launch {
-            val readings = allReadings.value
-            val pdfFile = PdfReportGenerator.generateMonthlyReport(
-                context = context,
-                periodName = periodLabel,
-                readings = readings,
-                gasConfig = gasConfig.value,
-                electricityConfig = electricityConfig.value
-            )
+            val readings = allReadings.value.let { all ->
+                if (sinceMs == null) all else all.filter { it.timestamp >= sinceMs }
+            }
+
+            val pdfFile = withContext(Dispatchers.IO) {
+                PdfReportGenerator.generateMonthlyReport(
+                    context = context,
+                    periodName = periodLabel,
+                    readings = readings,
+                    gasConfig = gasConfig.value,
+                    electricityConfig = electricityConfig.value
+                )
+            }
 
             if (pdfFile != null && pdfFile.exists()) {
                 _generatedPdf.value = pdfFile

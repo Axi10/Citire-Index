@@ -28,7 +28,15 @@ jobs:
       run: |
         touch .env
         if [ -f debug.keystore.base64 ]; then
-          base64 -d debug.keystore.base64 > debug.keystore
+          # The stored keystore was exported on Windows: Java sees its key under another alias.
+          # Re-import it under the alias Gradle expects (androiddebugkey).
+          base64 -d debug.keystore.base64 > debug-imported.p12
+          SRC_ALIAS=$(keytool -list -keystore debug-imported.p12 -storetype PKCS12 -storepass android | grep -m1 PrivateKeyEntry | cut -d, -f1)
+          echo "Key alias in stored keystore: $SRC_ALIAS"
+          keytool -importkeystore -noprompt \
+            -srckeystore debug-imported.p12 -srcstoretype PKCS12 -srcstorepass android -srcalias "$SRC_ALIAS" \
+            -destkeystore debug.keystore -deststoretype PKCS12 -deststorepass android \
+            -destalias androiddebugkey -destkeypass android
         fi
         if [ ! -f debug.keystore ]; then
           keytool -genkeypair -v \

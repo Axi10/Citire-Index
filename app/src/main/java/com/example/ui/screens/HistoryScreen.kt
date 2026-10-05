@@ -24,11 +24,14 @@ import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,6 +69,7 @@ fun HistoryScreen(
     // Strictly separated: Either GAS or ELECTRICITY (no combined view)
     var selectedUtility by remember { mutableStateOf(UtilityType.ELECTRICITY) }
     var readingToEdit by remember { mutableStateOf<MeterReading?>(null) }
+    var readingToDelete by remember { mutableStateOf<MeterReading?>(null) }
 
     val filteredReadings = remember(readings, selectedUtility) {
         readings.filter { it.utilityType == selectedUtility }
@@ -79,6 +83,9 @@ fun HistoryScreen(
         filteredReadings.sumOf { it.consumption }
     }
 
+    // Readings are sorted newest first, so the first one carries the current tariff
+    val currentTariff = filteredReadings.firstOrNull()?.unitPrice
+
     val accentColor = if (selectedUtility == UtilityType.GAS) GasCyan else ElectricityAmber
 
     // Edit Reading Dialog
@@ -89,6 +96,39 @@ fun HistoryScreen(
             onSave = { updated ->
                 onUpdateReading(updated)
                 readingToEdit = null
+            }
+        )
+    }
+
+    // Delete confirmation: a deleted reading cannot be brought back
+    readingToDelete?.let { reading ->
+        val dayFormat = SimpleDateFormat("dd MMM yyyy", Locale("ro", "RO"))
+        AlertDialog(
+            onDismissRequest = { readingToDelete = null },
+            title = {
+                Text(text = "Ștergi citirea?", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    text = "Indexul ${String.format(Locale.US, "%.0f", reading.indexValue)} ${reading.utilityType.unit} " +
+                        "din ${dayFormat.format(Date(reading.timestamp))} va fi șters definitiv."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteReading(reading)
+                        readingToDelete = null
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Șterge")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { readingToDelete = null }, shape = RoundedCornerShape(8.dp)) {
+                    Text("Anulează")
+                }
             }
         )
     }
@@ -192,7 +232,11 @@ fun HistoryScreen(
                 MetricCard(
                     title = "Cost Total ${selectedUtility.title}",
                     value = String.format(Locale.US, "%.2f LEI", totalCost),
-                    subtitle = "Tarif: ${if (selectedUtility == UtilityType.GAS) "3.02 lei/m³" else "1.64 lei/kWh"}",
+                    subtitle = if (currentTariff != null) {
+                        "Tarif: ${String.format(Locale.US, "%.2f", currentTariff)} lei/${selectedUtility.unit}"
+                    } else {
+                        "Nicio citire"
+                    },
                     icon = Icons.Default.Paid,
                     accentColor = CostGreen,
                     modifier = Modifier.weight(1f)
@@ -241,7 +285,7 @@ fun HistoryScreen(
                 ReadingItemCard(
                     reading = reading,
                     onEdit = { readingToEdit = reading },
-                    onDelete = { onDeleteReading(reading) }
+                    onDelete = { readingToDelete = reading }
                 )
             }
         }

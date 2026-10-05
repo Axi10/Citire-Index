@@ -110,7 +110,11 @@ object PdfReportGenerator {
             e.printStackTrace()
             null
         } finally {
-            pdfDocument.close()
+            // close() throws if a page was left unfinished by an earlier failure
+            try {
+                pdfDocument.close()
+            } catch (_: Exception) {
+            }
         }
     }
 

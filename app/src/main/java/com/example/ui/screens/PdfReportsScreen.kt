@@ -60,6 +60,7 @@ import com.example.ui.theme.ElectricityAmber
 import com.example.ui.theme.GasCyan
 import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -67,7 +68,7 @@ import java.util.Locale
 fun PdfReportsScreen(
     readings: List<MeterReading>,
     lastGeneratedFile: File?,
-    onExportPdf: (periodName: String) -> Unit,
+    onExportPdf: (periodName: String, sinceMs: Long?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -84,19 +85,30 @@ fun PdfReportsScreen(
         else -> "Istoric Complet"
     }
 
-    val periodReadings = remember(readings, selectedPeriodType) {
-        val now = System.currentTimeMillis()
+    // Start of the selected period; null means the whole history. The same value is used for
+    // the preview below and for the PDF, so the file always matches what is shown here.
+    val periodStartMs: Long? = remember(selectedPeriodType) {
         when (selectedPeriodType) {
-            0 -> {
-                val oneMonthAgo = now - 31L * 24 * 3600 * 1000
-                readings.filter { it.timestamp >= oneMonthAgo }
-            }
-            1 -> {
-                val threeMonthsAgo = now - 92L * 24 * 3600 * 1000
-                readings.filter { it.timestamp >= threeMonthsAgo }
-            }
-            else -> readings
+            0 -> Calendar.getInstance().apply {
+                set(Calendar.DAY_OF_MONTH, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            1 -> Calendar.getInstance().apply {
+                add(Calendar.MONTH, -3)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            else -> null
         }
+    }
+
+    val periodReadings = remember(readings, periodStartMs) {
+        if (periodStartMs == null) readings else readings.filter { it.timestamp >= periodStartMs }
     }
 
     val totalGas = periodReadings.filter { it.utilityType == UtilityType.GAS }.sumOf { it.consumption }
@@ -147,7 +159,7 @@ fun PdfReportsScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Document A4 imprimabil cu indecșii transmiși, consumul și costul estimativ.",
+                        text = "Document A4 imprimabil cu indeții transmiși, consumul și costul estimativ.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -392,7 +404,7 @@ fun PdfReportsScreen(
 
         // 5. Generate Button
         Button(
-            onClick = { onExportPdf(periodLabel) },
+            onClick = { onExportPdf(periodLabel, periodStartMs) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp)

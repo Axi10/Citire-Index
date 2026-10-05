@@ -1,9 +1,14 @@
 package com.example
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -35,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.UtilityType
@@ -99,6 +105,19 @@ fun MainScreen(viewModel: MainViewModel) {
     val lastGeneratedPdf by viewModel.generatedPdf.collectAsStateWithLifecycle()
     val userMessage by viewModel.userMessage.collectAsStateWithLifecycle()
     val callEvaluation by viewModel.lastCallEvaluation.collectAsStateWithLifecycle()
+
+    // Monthly reminders are useless without the notification permission (Android 13+),
+    // so ask for it on the first launch instead of leaving it buried in Settings.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
@@ -213,7 +232,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 2 -> PdfReportsScreen(
                     readings = allReadings,
                     lastGeneratedFile = lastGeneratedPdf,
-                    onExportPdf = { periodName -> viewModel.exportPdfReport(context, periodName) }
+                    onExportPdf = { periodName, sinceMs -> viewModel.exportPdfReport(context, periodName, sinceMs) }
                 )
 
                 3 -> SettingsScreen(

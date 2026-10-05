@@ -5,8 +5,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.provider.Settings
+import com.example.data.local.AppDatabase
 import com.example.data.model.UtilityType
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.Calendar
 
 data class SubmissionPeriodStatus(
@@ -91,33 +94,45 @@ object ReminderScheduler {
         }
     }
 
-    fun scheduleNext(context: Context, type: UtilityType, targetDay: Int = type.defaultDay, targetHour: Int = 9, targetMinute: Int = 0) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    private fun requestCodeFor(type: UtilityType): Int = if (type == UtilityType.GAS) 201 else 202
 
-        val now = Calendar.getInstance()
-        val nextDate = Calendar.getInstance().apply {
-            set(Calendar.DAY_OF_MONTH, targetDay)
-            set(Calendar.HOUR_OF_DAY, targetHour)
-            set(Calendar.MINUTE, targetMinute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-
-            // If target time for this month has already passed, schedule for next month
-            if (timeInMillis <= now.timeInMillis) {
-                add(Calendar.MONTH, 1)
-            }
-        }
-
-        val intent = Intent(context, ReminderNotificationReceiver::class.java).apply {
+    private fun reminderIntent(context: Context, type: UtilityType): Intent =
+        Intent(context, ReminderNotificationReceiver::class.java).apply {
             action = ReminderNotificationReceiver.ACTION_REMINDER
             putExtra(ReminderNotificationReceiver.EXTRA_UTILITY_TYPE, type.name)
         }
 
-        val requestCode = if (type == UtilityType.GAS) 201 else 202
+    /**
+     * Next moment (this month or the following one) when the reminder should fire.
+     * The day is clamped to the month length, so 31 in a 30-day month fires on the 30th
+     * instead of rolling over into the next month.
+     */
+    private fun nextOccurrence(day: Int, hour: Int, minute: Int): Calendar {
+        val now = Calendar.getInstance()
+
+        fun candidate(monthOffset: Int): Calendar = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            add(Calendar.MONTH, monthOffset)
+            set(Calendar.DAY_OF_MONTH, day.coerceIn(1, getActualMaximum(Calendar.DAY_OF_MONTH)))
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        val thisMonth = candidate(0)
+        return if (thisMonth.timeInMillis <= now.timeInMillis) candidate(1) else thisMonth
+    }
+
+    fun scheduleNext(context: Context, type: UtilityType, targetDay: Int = type.defaultDay, targetHour: Int = 9, targetMinute: Int = 0) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+        val nextDate = nextOccurrence(targetDay, targetHour, targetMinute)
+
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            requestCode,
-            intent,
+            requestCodeFor(type),
+            reminderIntent(context, type),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -154,19 +169,57 @@ object ReminderScheduler {
         }
     }
 
+    /**
+     * Removes the scheduled reminder for the given utility (used when reminders are disabled).
+     */
+    fun cancel(context: Context, type: UtilityType) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            requestCodeFor(type),
+            reminderIntent(context, type),
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+    }
+
+    /**
+     * Reschedules every reminder from the settings saved in the database.
+     * Falls back to the default day for a utility that has no saved config yet.
+     */
+    suspend fun rescheduleAllNow(context: Context) {
+        val appContext = context.applicationContext
+        val configDao = AppDatabase.getDatabase(appContext).configDao()
+        for (type in UtilityType.values()) {
+            val config = configDao.getConfigSync(type)
+            when {
+                config == null -> scheduleNext(appContext, type, type.defaultDay, 9, 0)
+                config.isReminderEnabled -> scheduleNext(
+                    appContext,
+                    type,
+                    config.reminderDayOfMonth,
+                    config.reminderHour,
+                    config.reminderMinute
+                )
+                else -> cancel(appContext, type)
+            }
+        }
+    }
+
     fun rescheduleAll(context: Context) {
-        scheduleNext(context, UtilityType.GAS, 16, 9, 0)
-        scheduleNext(context, UtilityType.ELECTRICITY, 24, 9, 0)
+        val appContext = context.applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            rescheduleAllNow(appContext)
+        }
     }
 
     /**
      * Instantly triggers a test notification so the user can see how it looks and works.
      */
     fun sendImmediateTestNotification(context: Context, type: UtilityType) {
-        val intent = Intent(context, ReminderNotificationReceiver::class.java).apply {
-            action = ReminderNotificationReceiver.ACTION_REMINDER
-            putExtra(ReminderNotificationReceiver.EXTRA_UTILITY_TYPE, type.name)
-        }
-        context.sendBroadcast(intent)
+        context.sendBroadcast(reminderIntent(context, type))
     }
 }

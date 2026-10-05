@@ -2,7 +2,6 @@ package com.example.ui
 
 import android.app.Application
 import android.content.Context
-import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
@@ -13,12 +12,10 @@ import com.example.data.repository.MeterRepository
 import com.example.notifications.ReminderScheduler
 import com.example.pdf.PdfReportGenerator
 import com.example.telecom.CallHelper
-import com.example.telecom.CallLogEntry
 import com.example.telecom.CallLogHelper
 import com.example.telecom.CallStatusEvaluation
 import com.example.telecom.CallVerificationResult
 import com.example.telecom.IvrSequenceBuilder
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,53 +24,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: MeterRepository
-
-    init {
-        val database = AppDatabase.getDatabase(application)
-        repository = MeterRepository(database.meterDao(), database.configDao())
-
-        viewModelScope.launch(Dispatchers.IO) {
-            val gas = repository.getLatestReadingSync(UtilityType.GAS)
-            val elec = repository.getLatestReadingSync(UtilityType.ELECTRICITY)
-            if (gas?.indexValue != 2899.0 || elec?.indexValue != 5397.0) {
-                seedUserProvidedReadings()
-            }
-        }
-    }
-
-    private suspend fun seedUserProvidedReadings() {
-        repository.deleteAllReadings()
-        val dayMs = 24L * 3600 * 1000
-        val now = System.currentTimeMillis()
-        val fourMonthsAgo = now - 120L * dayMs
-        val threeMonthsAgo = now - 90L * dayMs
-        val twoMonthsAgo = now - 60L * dayMs
-        val oneMonthAgo = now - 30L * dayMs
-        val sevenDaysAgo = now - 7L * dayMs
-
-        // Curent (5174, 5215, 5270, 5350, 5397 | 1.64)
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5174.0, previousIndexValue = null, consumption = 0.0, unitPrice = 1.64, estimatedCost = 0.0, timestamp = fourMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5215.0, previousIndexValue = 5174.0, consumption = 41.0, unitPrice = 1.64, estimatedCost = 41.0 * 1.64, timestamp = threeMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5270.0, previousIndexValue = 5215.0, consumption = 55.0, unitPrice = 1.64, estimatedCost = 55.0 * 1.64, timestamp = twoMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5350.0, previousIndexValue = 5270.0, consumption = 80.0, unitPrice = 1.64, estimatedCost = 80.0 * 1.64, timestamp = oneMonthAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5397.0, previousIndexValue = 5350.0, consumption = 47.0, unitPrice = 1.64, estimatedCost = 47.0 * 1.64, timestamp = now, isCallExecuted = true, notes = ""))
-
-        // Gaz (2886, 2889, 2892, 2896, 2899 | 3.02)
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2886.0, previousIndexValue = null, consumption = 0.0, unitPrice = 3.02, estimatedCost = 0.0, timestamp = fourMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2889.0, previousIndexValue = 2886.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = threeMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2892.0, previousIndexValue = 2889.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = twoMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2896.0, previousIndexValue = 2892.0, consumption = 4.0, unitPrice = 3.02, estimatedCost = 4.0 * 3.02, timestamp = oneMonthAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2899.0, previousIndexValue = 2896.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = sevenDaysAgo, isCallExecuted = true, notes = ""))
-
-        repository.saveConfig(UtilityConfig(utilityType = UtilityType.GAS, phoneNumber = UtilityType.GAS.defaultPhone, clientCode = UtilityType.GAS.defaultClientCode, ivrTemplate = UtilityType.GAS.defaultIvrTemplate, unitPrice = 3.02, reminderDayOfMonth = 16))
-        repository.saveConfig(UtilityConfig(utilityType = UtilityType.ELECTRICITY, phoneNumber = UtilityType.ELECTRICITY.defaultPhone, clientCode = UtilityType.ELECTRICITY.defaultClientCode, ivrTemplate = UtilityType.ELECTRICITY.defaultIvrTemplate, unitPrice = 1.64, reminderDayOfMonth = 24))
+    private val repository: MeterRepository = AppDatabase.getDatabase(application).let { database ->
+        MeterRepository(database.meterDao(), database.configDao())
     }
 
     // Active bottom navigation tab (0: Transmit, 1: History & Charts, 2: PDF, 3: Settings)
@@ -148,9 +103,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateIndexInput(input: String) {
-        // Allow digits and at most one decimal point
-        val filtered = input.filter { it.isDigit() || it == '.' }
-        _indexInput.value = filtered
+        // Meter indexes are sent to the IVR as whole numbers: digits only
+        _indexInput.value = input.filter { it.isDigit() }
     }
 
     fun clearUserMessage() {
@@ -179,7 +133,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getFullDialString(type: UtilityType, config: UtilityConfig?, indexString: String): String {
         val template = config?.ivrTemplate ?: type.defaultIvrTemplate
         val indexForDial = if (indexString.isBlank()) "XXXX" else {
-            // Usually meters transmit integer digits, or if decimal strip dot
+            // Meters transmit whole numbers; strip any separator just in case
             indexString.replace(".", "")
         }
         return IvrSequenceBuilder.buildDialString(template, indexForDial)
@@ -265,6 +219,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Verifies the call outcome by inspecting the Android call log duration.
+     * The call log only tells us how long the call lasted, not whether the robot
+     * accepted the index, so the messages below are deliberately cautious.
      */
     fun verifyCallOutcome(context: Context) {
         if (callInitiatedTimeMs == 0L || lastInitiatedType == null) return
@@ -282,7 +238,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (result.status == CallStatusEvaluation.CANCELLED_OR_MISSED) {
                 _userMessage.value = "Apel anulat imediat (0s). Indexul nu a fost transmis!"
             } else if (result.status == CallStatusEvaluation.CONFIRMED_SUCCESS) {
-                _userMessage.value = "Apel confirmat (${result.durationSeconds}s)! Indexul a fost transmis."
+                _userMessage.value = "Apel de ${result.durationSeconds}s. Probabil transmis; robotul nu poate confirma automat."
             }
         }
     }
@@ -336,8 +292,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateConfig(config: UtilityConfig) {
         viewModelScope.launch {
-            repository.saveConfig(config)
-            _userMessage.value = "Setările pentru ${config.utilityType.title} au fost actualizate!"
+            val previous = if (config.utilityType == UtilityType.GAS) gasConfig.value else electricityConfig.value
+
+            // The dial template embeds the client code and the phone number, so keep it in
+            // sync when the user edits them in Settings.
+            var template = config.ivrTemplate
+            if (previous != null) {
+                if (previous.clientCode.isNotBlank() && previous.clientCode != config.clientCode) {
+                    template = template.replace(previous.clientCode, config.clientCode)
+                }
+                if (previous.phoneNumber.isNotBlank() && previous.phoneNumber != config.phoneNumber) {
+                    template = template.replace(previous.phoneNumber, config.phoneNumber)
+                }
+            }
+            val updated = config.copy(ivrTemplate = template)
+
+            repository.saveConfig(updated)
+
+            // Apply the chosen reminder day / hour right away
+            val context = getApplication<Application>()
+            if (updated.isReminderEnabled) {
+                ReminderScheduler.scheduleNext(
+                    context,
+                    updated.utilityType,
+                    updated.reminderDayOfMonth,
+                    updated.reminderHour,
+                    updated.reminderMinute
+                )
+            } else {
+                ReminderScheduler.cancel(context, updated.utilityType)
+            }
+
+            _userMessage.value = "Setările pentru ${updated.utilityType.title} au fost actualizate!"
         }
     }
 

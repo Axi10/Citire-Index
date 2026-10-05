@@ -10,7 +10,11 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.data.local.AppDatabase
 import com.example.data.model.UtilityType
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class ReminderNotificationReceiver : BroadcastReceiver() {
 
@@ -35,26 +39,41 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            // Reschedule after reboot
-            ReminderScheduler.rescheduleAll(context)
-            return
+        val appContext = context.applicationContext
+        val pendingResult = goAsync()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+                    // Reschedule after reboot, from the saved settings
+                    ReminderScheduler.rescheduleAllNow(appContext)
+                    return@launch
+                }
+
+                val typeString = intent.getStringExtra(EXTRA_UTILITY_TYPE)
+                val utilityType = if (typeString == UtilityType.ELECTRICITY.name) {
+                    UtilityType.ELECTRICITY
+                } else {
+                    UtilityType.GAS
+                }
+
+                val config = AppDatabase.getDatabase(appContext).configDao().getConfigSync(utilityType)
+                val day = config?.reminderDayOfMonth ?: utilityType.defaultDay
+                val hour = config?.reminderHour ?: 9
+                val minute = config?.reminderMinute ?: 0
+
+                if (config == null || config.isReminderEnabled) {
+                    showReminderNotification(appContext, utilityType, day)
+                    // Reschedule for next month with the configured day / time
+                    ReminderScheduler.scheduleNext(appContext, utilityType, day, hour, minute)
+                }
+            } finally {
+                pendingResult.finish()
+            }
         }
-
-        val typeString = intent.getStringExtra(EXTRA_UTILITY_TYPE)
-        val utilityType = if (typeString == UtilityType.ELECTRICITY.name) {
-            UtilityType.ELECTRICITY
-        } else {
-            UtilityType.GAS
-        }
-
-        showReminderNotification(context, utilityType)
-
-        // Reschedule for next month
-        ReminderScheduler.scheduleNext(context, utilityType)
     }
 
-    private fun showReminderNotification(context: Context, type: UtilityType) {
+    private fun showReminderNotification(context: Context, type: UtilityType, day: Int) {
         ensureChannel(context)
 
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -70,9 +89,9 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
         )
 
         val title = if (type == UtilityType.GAS) {
-            "🔥 Transmite indexul la Gaz (16 ale lunii)"
+            "🔥 Transmite indexul la Gaz (ziua $day a lunii)"
         } else {
-            "⚡ Transmite indexul la Curent (24 ale lunii)"
+            "⚡ Transmite indexul la Curent (ziua $day a lunii)"
         }
 
         val message = if (type == UtilityType.GAS) {

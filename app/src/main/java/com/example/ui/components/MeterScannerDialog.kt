@@ -68,6 +68,11 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.Executors
 
+// How many of the latest frames are kept, and in how many of them a number must appear
+// before it is offered to the user (a single frame is often a misread)
+private const val RECENT_FRAMES = 8
+private const val MIN_FRAME_VOTES = 3
+
 @Composable
 fun MeterScannerDialog(
     onDismiss: () -> Unit,
@@ -149,7 +154,6 @@ private fun CameraScannerContent(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var detectedCandidates by remember { mutableStateOf<List<String>>(emptyList()) }
     var bestMatch by remember { mutableStateOf<String?>(null) }
     var isTorchOn by remember { mutableStateOf(false) }
     var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
@@ -157,8 +161,17 @@ private fun CameraScannerContent(
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val textRecognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
+    // Candidates seen in the latest frames; touched from the analyzer thread only
+    val recentFrames = remember { mutableListOf<List<String>>() }
+    // Kept so the camera can be released when the dialog is closed
+    val cameraProviderHolder = remember { arrayOfNulls<ProcessCameraProvider>(1) }
+
     DisposableEffect(Unit) {
         onDispose {
+            // The use cases are bound to the activity lifecycle: without this the camera (and
+            // the torch) keep running after the dialog is closed, and the analyzer keeps
+            // calling a recognizer that has been closed.
+            cameraProviderHolder[0]?.unbindAll()
             cameraExecutor.shutdown()
             textRecognizer.close()
         }
@@ -180,6 +193,7 @@ private fun CameraScannerContent(
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                 cameraProviderFuture.addListener({
                     val cameraProvider = cameraProviderFuture.get()
+                    cameraProviderHolder[0] = cameraProvider
                     val preview = Preview.Builder().build().also {
                         it.surfaceProvider = previewView.surfaceProvider
                     }
@@ -190,9 +204,19 @@ private fun CameraScannerContent(
 
                     imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
                         processImageProxy(imageProxy, textRecognizer) { candidates ->
-                            if (candidates.isNotEmpty()) {
-                                detectedCandidates = candidates
-                                bestMatch = candidates.firstOrNull()
+                            // A number is offered only when it showed up in several recent frames
+                            val stable = synchronized(recentFrames) {
+                                recentFrames.add(candidates.distinct())
+                                if (recentFrames.size > RECENT_FRAMES) recentFrames.removeAt(0)
+                                recentFrames.flatten()
+                                    .groupingBy { it }
+                                    .eachCount()
+                                    .filter { it.value >= MIN_FRAME_VOTES }
+                                    .maxByOrNull { it.value }
+                                    ?.key
+                            }
+                            if (stable != null) {
+                                bestMatch = stable
                             }
                         }
                     }
@@ -337,7 +361,7 @@ private fun CameraScannerContent(
                             }
 
                             Button(
-                                onClick = { onIndexSelected(bestMatch!!) },
+                                onClick = { bestMatch?.let { onIndexSelected(it) } },
                                 modifier = Modifier.weight(1.5f),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
@@ -379,15 +403,19 @@ private fun processImageProxy(
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
                 val detected = mutableListOf<String>()
-                // Extract sequences of 3 to 8 digits (typical meter reading)
-                val regex = Regex("""\b\d{3,8}\b""")
+                // A meter reading has 3 to 7 digits; longer numbers are serial numbers etc.
+                val digitsOnly = Regex("""\d{3,7}""")
                 for (block in visionText.textBlocks) {
-                    val text = block.text.replace("O", "0").replace("o", "0").replace(" ", "")
-                    regex.findAll(text).forEach { match ->
-                        val digits = match.value
-                        // Exclude years like 2024, 2025, 2026 if standalone
-                        if (digits != "2024" && digits != "2025" && digits != "2026") {
-                            detected.add(digits)
+                    for (line in block.lines) {
+                        // Each whitespace separated token is checked on its own, so two
+                        // numbers on the same line are not glued into one
+                        for (token in line.text.split(Regex("\\s+"))) {
+                            val cleaned = token.replace('O', '0').replace('o', '0')
+                            if (digitsOnly.matches(cleaned) &&
+                                cleaned != "2024" && cleaned != "2025" && cleaned != "2026"
+                            ) {
+                                detected.add(cleaned)
+                            }
                         }
                     }
                 }

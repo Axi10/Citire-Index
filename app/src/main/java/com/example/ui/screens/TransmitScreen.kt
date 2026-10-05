@@ -201,7 +201,7 @@ fun TransmitScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = if (latestReading != null) "${latestReading.indexValue.toInt()} ${activeUtility.unit}" else "Nicio citire",
+                        text = if (latestReading != null) "${latestReading.indexValue.toLong()} ${activeUtility.unit}" else "Nicio citire",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
                         color = MaterialTheme.colorScheme.onSurface
@@ -319,7 +319,7 @@ fun TransmitScreen(
                         MetricCard(
                             title = "Consum",
                             value = "+${String.format(Locale.US, "%.1f", consumption)} ${activeUtility.unit}",
-                            subtitle = if (prevIndexVal != null) "Față de ${prevIndexVal.toInt()}" else "Prima citire",
+                            subtitle = if (prevIndexVal != null) "Față de ${prevIndexVal.toLong()}" else "Prima citire",
                             icon = Icons.Default.Speed,
                             accentColor = accentColor,
                             modifier = Modifier.weight(1f)
@@ -371,7 +371,7 @@ fun TransmitScreen(
 
             OutlinedButton(
                 onClick = onSaveOnly,
-                enabled = currentIndexVal > 0,
+                enabled = currentIndexVal > 0 && !isNegativeIndex,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(46.dp)
@@ -418,7 +418,7 @@ private fun CallOutcomeBanner(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isSuccess) "Apel Confirmat" else "Verificare Apel",
+                        text = if (isSuccess) "Apel finalizat" else "Verificare Apel",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.5.sp,
                         color = if (isSuccess) Color(0xFF2E7D32) else Color(0xFFE65100)
@@ -495,7 +495,7 @@ private fun UtilitySelectorBar(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "GAZ (ziua 16)",
+                        text = "GAZ",
                         fontWeight = if (isGas) FontWeight.Bold else FontWeight.Medium,
                         fontSize = 13.5.sp,
                         color = if (isGas) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
@@ -525,7 +525,7 @@ private fun UtilitySelectorBar(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "CURENT (ziua 24)",
+                        text = "CURENT",
                         fontWeight = if (isElec) FontWeight.Bold else FontWeight.Medium,
                         fontSize = 13.5.sp,
                         color = if (isElec) Color.White else MaterialTheme.colorScheme.onSurfaceVariant

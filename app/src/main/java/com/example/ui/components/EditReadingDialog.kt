@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,10 +34,14 @@ fun EditReadingDialog(
     onDismiss: () -> Unit,
     onSave: (MeterReading) -> Unit
 ) {
-    var indexText by remember { mutableStateOf(reading.indexValue.toInt().toString()) }
+    var indexText by remember { mutableStateOf(reading.indexValue.toLong().toString()) }
 
-    val newIndex = indexText.toDoubleOrNull()
+    // Meter indexes are whole numbers
+    val newIndex = indexText.toLongOrNull()?.toDouble()
     val prevIndex = reading.previousIndexValue
+    val isBelowPrevious = newIndex != null && prevIndex != null && newIndex < prevIndex
+    val isValid = newIndex != null && newIndex > 0 && !isBelowPrevious
+
     val newConsumption = if (newIndex != null && prevIndex != null) {
         (newIndex - prevIndex).coerceAtLeast(0.0)
     } else {
@@ -59,10 +62,16 @@ fun EditReadingDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = indexText,
-                    onValueChange = { indexText = it },
+                    onValueChange = { input -> indexText = input.filter { it.isDigit() }.take(9) },
                     label = { Text("Valoare Index (${reading.utilityType.unit})") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
+                    isError = isBelowPrevious,
+                    supportingText = {
+                        if (isBelowPrevious) {
+                            Text("Indexul nu poate fi mai mic decât cel precedent (${prevIndex?.toLong()}).")
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp)
                 )
@@ -74,7 +83,7 @@ fun EditReadingDialog(
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Text(
-                            text = "Index precedent: ${prevIndex?.toInt() ?: "-"} ${reading.utilityType.unit}",
+                            text = "Index precedent: ${prevIndex?.toLong() ?: "-"} ${reading.utilityType.unit}",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -97,17 +106,16 @@ fun EditReadingDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (newIndex != null && newIndex > 0) {
+                    if (newIndex != null && isValid) {
                         val updated = reading.copy(
                             indexValue = newIndex,
                             consumption = newConsumption,
-                            estimatedCost = newCost,
-                            notes = ""
+                            estimatedCost = newCost
                         )
                         onSave(updated)
                     }
                 },
-                enabled = newIndex != null && newIndex > 0,
+                enabled = isValid,
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Salvează")

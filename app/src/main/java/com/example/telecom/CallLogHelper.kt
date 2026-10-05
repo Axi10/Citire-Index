@@ -90,6 +90,8 @@ object CallLogHelper {
 
     /**
      * Evaluates whether the call lasted long enough for the IVR robot to complete.
+     * The call log only knows the duration: it cannot tell whether the robot accepted
+     * the index, so a long call is reported as "probably transmitted".
      */
     fun evaluateCall(entry: CallLogEntry?, utilityType: UtilityType): CallVerificationResult {
         if (entry == null) {
@@ -121,7 +123,7 @@ object CallLogHelper {
                 CallVerificationResult(
                     status = CallStatusEvaluation.CONFIRMED_SUCCESS,
                     durationSeconds = entry.durationSeconds,
-                    message = "Apel finalizat cu succes (${entry.durationSeconds} secunde). Indexul a fost preluat de robot."
+                    message = "Apel de ${entry.durationSeconds} secunde, suficient ca robotul să fi preluat indexul. Aplicația nu poate confirma sigur; verifică mesajul vocal sau factura."
                 )
             }
         }

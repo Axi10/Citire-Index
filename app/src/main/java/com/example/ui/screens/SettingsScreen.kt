@@ -42,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -292,6 +293,7 @@ private fun MinimalUtilityCard(
 ) {
     val price = config?.unitPrice ?: type.defaultPrice
     val day = config?.reminderDayOfMonth ?: type.defaultDay
+    val remindersOn = config?.isReminderEnabled ?: true
     val code = config?.clientCode ?: type.defaultClientCode
     val phone = config?.phoneNumber ?: type.defaultPhone
 
@@ -357,7 +359,7 @@ private fun MinimalUtilityCard(
                     )
                     ConfigInfoTile(
                         label = "Zi notificare",
-                        value = "Ziua $day a lunii",
+                        value = if (remindersOn) "Ziua $day a lunii" else "Dezactivat",
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -422,6 +424,19 @@ private fun EditConfigModal(
     var dayText by remember { mutableStateOf((currentConfig?.reminderDayOfMonth ?: type.defaultDay).toString()) }
     var codeText by remember { mutableStateOf(currentConfig?.clientCode ?: type.defaultClientCode) }
     var phoneText by remember { mutableStateOf(currentConfig?.phoneNumber ?: type.defaultPhone) }
+    var reminderEnabled by remember { mutableStateOf(currentConfig?.isReminderEnabled ?: true) }
+
+    // Romanian keyboards type a decimal comma (3,02), so accept both separators
+    val price = priceText.trim().replace(',', '.').toDoubleOrNull()
+    val day = dayText.trim().toIntOrNull()
+    val code = codeText.trim()
+    val phone = phoneText.trim()
+
+    val priceError = price == null || price <= 0.0
+    val dayError = day == null || day !in 1..31
+    val codeError = code.isEmpty() || !code.all { it.isDigit() }
+    val phoneError = phone.length < 3 || !phone.all { it.isDigit() || it == '+' }
+    val hasError = priceError || dayError || codeError || phoneError
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -433,13 +448,18 @@ private fun EditConfigModal(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedTextField(
                     value = priceText,
                     onValueChange = { priceText = it },
                     label = { Text("Preț (lei/${type.unit})") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    isError = priceError,
+                    supportingText = { if (priceError) Text("Introdu un preț valid, de exemplu 3,02") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
@@ -450,6 +470,8 @@ private fun EditConfigModal(
                     label = { Text("Zi notificare lunară (1-31)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
+                    isError = dayError,
+                    supportingText = { if (dayError) Text("Alege o zi între 1 și 31") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
@@ -460,6 +482,8 @@ private fun EditConfigModal(
                     label = { Text("Cod Client") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
+                    isError = codeError,
+                    supportingText = { if (codeError) Text("Codul de client conține doar cifre") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
@@ -470,31 +494,44 @@ private fun EditConfigModal(
                     label = { Text("Număr TelVerde") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
+                    isError = phoneError,
+                    supportingText = { if (phoneError) Text("Introdu un număr de telefon valid") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Notificări lunare", fontSize = 14.sp)
+                    Switch(checked = reminderEnabled, onCheckedChange = { reminderEnabled = it })
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val p = priceText.toDoubleOrNull() ?: type.defaultPrice
-                    val d = dayText.toIntOrNull()?.coerceIn(1, 31) ?: type.defaultDay
-                    val updated = (currentConfig ?: UtilityConfig(
-                        utilityType = type,
-                        phoneNumber = phoneText,
-                        clientCode = codeText,
-                        ivrTemplate = type.defaultIvrTemplate,
-                        unitPrice = p,
-                        reminderDayOfMonth = d
-                    )).copy(
-                        phoneNumber = phoneText,
-                        clientCode = codeText,
-                        unitPrice = p,
-                        reminderDayOfMonth = d
-                    )
-                    onSave(updated)
+                    if (!hasError && price != null && day != null) {
+                        val updated = (currentConfig ?: UtilityConfig(
+                            utilityType = type,
+                            phoneNumber = phone,
+                            clientCode = code,
+                            ivrTemplate = type.defaultIvrTemplate,
+                            unitPrice = price,
+                            reminderDayOfMonth = day
+                        )).copy(
+                            phoneNumber = phone,
+                            clientCode = code,
+                            unitPrice = price,
+                            reminderDayOfMonth = day,
+                            isReminderEnabled = reminderEnabled
+                        )
+                        onSave(updated)
+                    }
                 },
+                enabled = !hasError,
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Salvează")

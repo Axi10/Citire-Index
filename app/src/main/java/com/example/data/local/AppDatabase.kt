@@ -8,6 +8,7 @@ import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.MeterReading
 import com.example.data.model.UtilityConfig
+import com.example.data.model.UtilityType
 
 @Database(
     entities = [MeterReading::class, UtilityConfig::class],
@@ -43,17 +44,16 @@ abstract class AppDatabase : RoomDatabase() {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 super.onCreate(db)
 
-                // Default settings for each utility. The reading history starts empty:
-                // the user's real indexes are entered from the app.
-                db.execSQL("""
-                    INSERT OR REPLACE INTO utility_configs (utilityType, phoneNumber, clientCode, ivrTemplate, unitPrice, reminderDayOfMonth, reminderHour, reminderMinute, isReminderEnabled)
-                    VALUES ('GAS', '0800800200', '3730081', '0800800200,3730081#,,,XXXX#,,1', 3.02, 16, 9, 0, 1)
-                """.trimIndent())
-
-                db.execSQL("""
-                    INSERT OR REPLACE INTO utility_configs (utilityType, phoneNumber, clientCode, ivrTemplate, unitPrice, reminderDayOfMonth, reminderHour, reminderMinute, isReminderEnabled)
-                    VALUES ('ELECTRICITY', '0800070701', '111192991', '0800070701,1,,111192991#,,,1,,,,,XXXX#,,1', 1.64, 24, 9, 0, 1)
-                """.trimIndent())
+                // Default settings for each utility. The client code starts empty (the user types it
+                // in Settings) and the reading history starts empty too.
+                for (type in UtilityType.values()) {
+                    db.execSQL(
+                        "INSERT OR REPLACE INTO utility_configs " +
+                            "(utilityType, phoneNumber, clientCode, ivrTemplate, unitPrice, reminderDayOfMonth, reminderHour, reminderMinute, isReminderEnabled) " +
+                            "VALUES ('${type.name}', '${type.defaultPhone}', '${type.defaultClientCode}', " +
+                            "'${type.defaultIvrTemplate}', ${type.defaultPrice}, ${type.defaultDay}, 9, 0, 1)"
+                    )
+                }
             }
         }
     }

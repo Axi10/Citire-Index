@@ -59,7 +59,9 @@ object CallLogHelper {
             CallLog.Calls.OUTGOING_TYPE.toString(),
             minTime.toString()
         )
-        val sortOrder = "${CallLog.Calls.DATE} DESC LIMIT 1"
+        // No "LIMIT 1" here: Android 11+ rejects it in sortOrder ("Invalid token LIMIT"), so we
+        // sort newest first and read just the first row.
+        val sortOrder = "${CallLog.Calls.DATE} DESC"
 
         return try {
             context.contentResolver.query(

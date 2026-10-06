@@ -44,8 +44,11 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-                    // Reschedule after reboot, from the saved settings
+                // Alarms are lost on reboot, and an app update can clear them too:
+                // rebuild them from the saved settings
+                if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+                    intent.action == Intent.ACTION_MY_PACKAGE_REPLACED
+                ) {
                     ReminderScheduler.rescheduleAllNow(appContext)
                     return@launch
                 }
@@ -102,8 +105,9 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
 
         val notificationId = if (type == UtilityType.GAS) 1001 else 1002
 
+        // The status bar needs a monochrome icon: the launcher foreground shows up as a white square
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
@@ -111,7 +115,7 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .addAction(
-                R.drawable.ic_launcher_foreground,
+                R.drawable.ic_notification,
                 "Apelează & Transmite",
                 pendingIntent
             )

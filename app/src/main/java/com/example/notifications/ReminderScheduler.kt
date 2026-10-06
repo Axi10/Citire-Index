@@ -30,19 +30,6 @@ object ReminderScheduler {
 
     private val MONTH_NAMES = arrayOf("Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Noi", "Dec")
 
-    fun getDaysUntilNextSubmission(targetDayOfMonth: Int): Int {
-        val now = Calendar.getInstance()
-        val currentDay = now.get(Calendar.DAY_OF_MONTH)
-
-        return if (currentDay <= targetDayOfMonth) {
-            targetDayOfMonth - currentDay
-        } else {
-            // Days remaining in this month + target day in next month
-            val maxDayThisMonth = now.getActualMaximum(Calendar.DAY_OF_MONTH)
-            (maxDayThisMonth - currentDay) + targetDayOfMonth
-        }
-    }
-
     /** Midnight of [day] in the given month (month may overflow, e.g. 12 = January next year). */
     private fun dueDate(year: Int, month: Int, day: Int): Calendar =
         Calendar.getInstance().apply {
@@ -63,9 +50,17 @@ object ReminderScheduler {
      * The due date is the target day of the month. A reading counts for a due date when it was
      * made at most 15 days before it, so an index sent on the 5th covers the 16th of the same
      * month, while one sent on the 28th of last month does not.
+     *
+     * [latestReadingTimestamp] must be the time of the latest reading that was really transmitted.
+     * [nowMillis] is a parameter so the logic can be tested.
      */
-    fun getSubmissionStatus(targetDayOfMonth: Int, latestReadingTimestamp: Long?): SubmissionPeriodStatus {
+    fun getSubmissionStatus(
+        targetDayOfMonth: Int,
+        latestReadingTimestamp: Long?,
+        nowMillis: Long = System.currentTimeMillis()
+    ): SubmissionPeriodStatus {
         val today = Calendar.getInstance().apply {
+            timeInMillis = nowMillis
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)

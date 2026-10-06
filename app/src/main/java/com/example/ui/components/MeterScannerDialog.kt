@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.pm.PackageManager
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -151,12 +150,13 @@ private fun CameraScannerContent(
     onDismiss: () -> Unit,
     onIndexSelected: (String) -> Unit
 ) {
-    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var bestMatch by remember { mutableStateOf<String?>(null) }
     var isTorchOn by remember { mutableStateOf(false) }
     var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
+    // Set when the camera could not be opened (used by another app, blocked by policy, ...)
+    var cameraError by remember { mutableStateOf(false) }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val textRecognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
@@ -192,48 +192,49 @@ private fun CameraScannerContent(
 
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                 cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
-                    cameraProviderHolder[0] = cameraProvider
-                    val preview = Preview.Builder().build().also {
-                        it.surfaceProvider = previewView.surfaceProvider
-                    }
+                    // get() throws when the camera service is unavailable; this runs on the main
+                    // thread, so an uncaught exception here would close the whole app
+                    try {
+                        val cameraProvider = cameraProviderFuture.get()
+                        cameraProviderHolder[0] = cameraProvider
+                        val preview = Preview.Builder().build().also {
+                            it.surfaceProvider = previewView.surfaceProvider
+                        }
 
-                    val imageAnalysis = ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
 
-                    imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                        processImageProxy(imageProxy, textRecognizer) { candidates ->
-                            // A number is offered only when it showed up in several recent frames
-                            val stable = synchronized(recentFrames) {
-                                recentFrames.add(candidates.distinct())
-                                if (recentFrames.size > RECENT_FRAMES) recentFrames.removeAt(0)
-                                recentFrames.flatten()
-                                    .groupingBy { it }
-                                    .eachCount()
-                                    .filter { it.value >= MIN_FRAME_VOTES }
-                                    .maxByOrNull { it.value }
-                                    ?.key
-                            }
-                            if (stable != null) {
-                                bestMatch = stable
+                        imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                            processImageProxy(imageProxy, textRecognizer) { candidates ->
+                                // A number is offered only when it showed up in several recent frames
+                                val stable = synchronized(recentFrames) {
+                                    recentFrames.add(candidates.distinct())
+                                    if (recentFrames.size > RECENT_FRAMES) recentFrames.removeAt(0)
+                                    recentFrames.flatten()
+                                        .groupingBy { it }
+                                        .eachCount()
+                                        .filter { it.value >= MIN_FRAME_VOTES }
+                                        .maxByOrNull { it.value }
+                                        ?.key
+                                }
+                                if (stable != null) {
+                                    bestMatch = stable
+                                }
                             }
                         }
-                    }
 
-                    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                    try {
                         cameraProvider.unbindAll()
                         val camera = cameraProvider.bindToLifecycle(
                             lifecycleOwner,
-                            cameraSelector,
+                            CameraSelector.DEFAULT_BACK_CAMERA,
                             preview,
                             imageAnalysis
                         )
                         cameraControl = camera.cameraControl
                     } catch (e: Exception) {
                         e.printStackTrace()
+                        cameraError = true
                     }
                 }, ContextCompat.getMainExecutor(ctx))
 
@@ -340,7 +341,16 @@ private fun CameraScannerContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (bestMatch != null) {
+                    if (cameraError) {
+                        Text(
+                            text = "Camera nu poate fi deschisă acum (poate o folosește altă aplicație). Închide scanerul și scrie indexul manual.",
+                            color = Color.White,
+                            fontSize = 13.sp
+                        )
+                        Button(onClick = onDismiss, shape = RoundedCornerShape(10.dp)) {
+                            Text("Închide")
+                        }
+                    } else if (bestMatch != null) {
                         Text(
                             text = "Index detectat: $bestMatch",
                             color = Color.White,

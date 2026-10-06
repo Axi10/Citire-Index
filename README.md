@@ -18,7 +18,7 @@ Introduci indexul de pe contor (sau îl scanezi cu camera), iar aplicația apele
 ## Istoric și copie de siguranță
 
 - **Raport PDF**: pe perioada aleasă (luna curentă, ultimele 3 luni sau tot istoricul), pe mai multe pagini.
-- **Export CSV**: tot istoricul, ca fișier care se deschide în Excel. Fă-l înainte de a dezinstala aplicația, pentru că dezinstalarea șterge datele.
+- **Export CSV** și **Import CSV**: tot istoricul, ca fișier care se deschide în Excel. Fă exportul înainte de a dezinstala aplicația, pentru că dezinstalarea șterge datele; importul le pune la loc fără să dubleze citirile existente.
 
 ## Cum obții APK-ul
 
@@ -39,11 +39,3 @@ Pot fi mai vechi decât codul. Permite instalarea din surse necunoscute dacă ț
 Android instalează un APK peste aplicația existentă doar dacă are **aceeași semnătură**. Ca APK-urile din Actions să aibă mereu aceeași semnătură, workflow-ul citește o cheie din secretul `DEBUG_KEYSTORE_BASE64` al depozitului (Settings → Secrets and variables → Actions). Fără secret, fiecare build își generează o cheie temporară și nu se mai poate instala peste versiunea veche (trebuie dezinstalată mai întâi, ceea ce șterge datele: fă mai întâi exportul CSV).
 
 Cheia nu se pune niciodată în depozit: este un secret, iar depozitul este public.
-
-## Teste
-
-Testele unitare (șablonul de apel, statusul de transmitere, evaluarea apelului) rulează în workflow după build, sau local cu:
-
-```bash
-./gradlew testDebugUnitTest --tests "com.example.unit.*"
-```

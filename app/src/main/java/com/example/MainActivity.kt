@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.ElectricBolt
-import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
@@ -98,6 +96,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val activeUtility by viewModel.activeUtility.collectAsStateWithLifecycle()
     val currentConfig by viewModel.currentConfig.collectAsStateWithLifecycle()
     val currentLatestReading by viewModel.currentLatestReading.collectAsStateWithLifecycle()
+    val lastTransmittedAt by viewModel.currentLastTransmittedAt.collectAsStateWithLifecycle()
     val indexInput by viewModel.indexInput.collectAsStateWithLifecycle()
     val allReadings by viewModel.allReadings.collectAsStateWithLifecycle()
     val gasConfig by viewModel.gasConfig.collectAsStateWithLifecycle()
@@ -213,6 +212,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     activeUtility = activeUtility,
                     config = currentConfig,
                     latestReading = currentLatestReading,
+                    lastTransmittedAt = lastTransmittedAt,
                     indexInput = indexInput,
                     callEvaluation = callEvaluation,
                     onUtilitySelected = { viewModel.selectUtility(it) },
@@ -220,7 +220,8 @@ fun MainScreen(viewModel: MainViewModel) {
                     onTransmitAndCall = { directCall -> viewModel.transmitAndCall(context, directCall) },
                     onSaveOnly = { viewModel.saveReadingOnly() },
                     onUndoLastReading = { viewModel.undoLastReading() },
-                    onDismissCallEvaluation = { viewModel.clearLastCallEvaluation() }
+                    onDismissCallEvaluation = { viewModel.clearLastCallEvaluation() },
+                    onOpenSettings = { viewModel.setTab(3) }
                 )
 
                 1 -> HistoryScreen(
@@ -232,7 +233,8 @@ fun MainScreen(viewModel: MainViewModel) {
                 2 -> PdfReportsScreen(
                     readings = allReadings,
                     lastGeneratedFile = lastGeneratedPdf,
-                    onExportPdf = { periodName, sinceMs -> viewModel.exportPdfReport(context, periodName, sinceMs) }
+                    onExportPdf = { periodName, sinceMs -> viewModel.exportPdfReport(context, periodName, sinceMs) },
+                    onExportCsv = { viewModel.exportCsv(context) }
                 )
 
                 3 -> SettingsScreen(

@@ -5,12 +5,16 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
@@ -34,7 +38,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,6 +51,7 @@ import com.example.data.model.UtilityType
 import com.example.notifications.ReminderNotificationReceiver
 import com.example.notifications.ReminderScheduler
 import com.example.ui.MainViewModel
+import com.example.ui.UiPreferences
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.PdfReportsScreen
 import com.example.ui.screens.SettingsScreen
@@ -59,6 +66,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        UiPreferences.load(this)
+
         // Ensure notification channel is registered & reminders scheduled
         ReminderNotificationReceiver.ensureChannel(this)
         ReminderScheduler.rescheduleAll(this)
@@ -66,7 +75,9 @@ class MainActivity : ComponentActivity() {
         val notificationUtility = intent.getStringExtra(ReminderNotificationReceiver.EXTRA_UTILITY_TYPE)
 
         setContent {
-            MyApplicationTheme {
+            val dynamicColor by UiPreferences.dynamicColor.collectAsStateWithLifecycle()
+
+            MyApplicationTheme(dynamicColor = dynamicColor) {
                 val viewModel: MainViewModel = viewModel()
 
                 // If launched from notification, activate that utility tab
@@ -90,6 +101,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
@@ -104,6 +116,12 @@ fun MainScreen(viewModel: MainViewModel) {
     val lastGeneratedPdf by viewModel.generatedPdf.collectAsStateWithLifecycle()
     val userMessage by viewModel.userMessage.collectAsStateWithLifecycle()
     val callEvaluation by viewModel.lastCallEvaluation.collectAsStateWithLifecycle()
+    val dynamicColor by UiPreferences.dynamicColor.collectAsStateWithLifecycle()
+
+    // From another tab, Back goes to the main screen first instead of closing the app
+    BackHandler(enabled = selectedTab != 0) {
+        viewModel.setTab(0)
+    }
 
     // Monthly reminders are useless without the notification permission (Android 13+),
     // so ask for it on the first launch instead of leaving it buried in Settings.
@@ -133,6 +151,8 @@ fun MainScreen(viewModel: MainViewModel) {
 
     LaunchedEffect(userMessage) {
         userMessage?.let {
+            // A short tick so the result of an action is felt, not only read
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             snackbarHostState.showSnackbar(it)
             viewModel.clearUserMessage()
         }
@@ -202,49 +222,59 @@ fun MainScreen(viewModel: MainViewModel) {
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
+        // With edge-to-edge enforced (Android 15+) the window no longer shrinks for the keyboard,
+        // so the content must apply the IME inset itself or the keyboard covers the index field.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
+                .imePadding()
         ) {
-            when (selectedTab) {
-                0 -> TransmitScreen(
-                    activeUtility = activeUtility,
-                    config = currentConfig,
-                    latestReading = currentLatestReading,
-                    lastTransmittedAt = lastTransmittedAt,
-                    indexInput = indexInput,
-                    callEvaluation = callEvaluation,
-                    onUtilitySelected = { viewModel.selectUtility(it) },
-                    onIndexChanged = { viewModel.updateIndexInput(it) },
-                    onTransmitAndCall = { directCall -> viewModel.transmitAndCall(context, directCall) },
-                    onSaveOnly = { viewModel.saveReadingOnly() },
-                    onUndoLastReading = { viewModel.undoLastReading() },
-                    onDismissCallEvaluation = { viewModel.clearLastCallEvaluation() },
-                    onOpenSettings = { viewModel.setTab(3) }
-                )
+            Crossfade(targetState = selectedTab, label = "tabs") { tab ->
+                when (tab) {
+                    0 -> TransmitScreen(
+                        activeUtility = activeUtility,
+                        config = currentConfig,
+                        latestReading = currentLatestReading,
+                        lastTransmittedAt = lastTransmittedAt,
+                        indexInput = indexInput,
+                        callEvaluation = callEvaluation,
+                        onUtilitySelected = { viewModel.selectUtility(it) },
+                        onIndexChanged = { viewModel.updateIndexInput(it) },
+                        onTransmitAndCall = { directCall -> viewModel.transmitAndCall(context, directCall) },
+                        onSaveOnly = { viewModel.saveReadingOnly() },
+                        onUndoLastReading = { viewModel.undoLastReading() },
+                        onDismissCallEvaluation = { viewModel.clearLastCallEvaluation() },
+                        onOpenSettings = { viewModel.setTab(3) }
+                    )
 
-                1 -> HistoryScreen(
-                    readings = allReadings,
-                    onDeleteReading = { viewModel.deleteReading(it) },
-                    onUpdateReading = { viewModel.updateReading(it) }
-                )
+                    1 -> HistoryScreen(
+                        readings = allReadings,
+                        onDeleteReading = { viewModel.deleteReading(it) },
+                        onUpdateReading = { viewModel.updateReading(it) }
+                    )
 
-                2 -> PdfReportsScreen(
-                    readings = allReadings,
-                    lastGeneratedFile = lastGeneratedPdf,
-                    onExportPdf = { periodName, sinceMs -> viewModel.exportPdfReport(context, periodName, sinceMs) },
-                    onExportCsv = { viewModel.exportCsv(context) },
-                    onImportCsv = { uri -> viewModel.importCsv(context, uri) }
-                )
+                    2 -> PdfReportsScreen(
+                        readings = allReadings,
+                        lastGeneratedFile = lastGeneratedPdf,
+                        onExportPdf = { periodName, sinceMs -> viewModel.exportPdfReport(context, periodName, sinceMs) },
+                        onExportCsv = { viewModel.exportCsv(context) },
+                        onImportCsv = { uri -> viewModel.importCsv(context, uri) }
+                    )
 
-                3 -> SettingsScreen(
-                    gasConfig = gasConfig,
-                    electricityConfig = electricityConfig,
-                    onSaveConfig = { viewModel.updateConfig(it) },
-                    onTestNotification = { type -> viewModel.triggerTestNotification(context, type) },
-                    onTestCall = { type, directCall -> viewModel.triggerTestCall(context, type, directCall) }
-                )
+                    3 -> SettingsScreen(
+                        gasConfig = gasConfig,
+                        electricityConfig = electricityConfig,
+                        onSaveConfig = { viewModel.updateConfig(it) },
+                        onTestNotification = { type -> viewModel.triggerTestNotification(context, type) },
+                        onTestCall = { type, directCall -> viewModel.triggerTestCall(context, type, directCall) },
+                        dynamicColor = dynamicColor,
+                        onDynamicColorChange = { enabled -> UiPreferences.setDynamicColor(context, enabled) }
+                    )
+
+                    else -> Unit
+                }
             }
         }
     }

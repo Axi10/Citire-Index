@@ -39,6 +39,10 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+// A fixed locale: Locale.getDefault() read inside a composable does not trigger a recomposition
+// when the system language changes
+private val ROMANIAN: Locale = Locale.forLanguageTag("ro-RO")
+
 // The date picker works in UTC midnight; readings keep their local time of day.
 private fun toPickerMillis(timestamp: Long): Long {
     val local = Calendar.getInstance().apply { timeInMillis = timestamp }
@@ -67,7 +71,7 @@ fun EditReadingDialog(
     var timestamp by remember { mutableStateOf(reading.timestamp) }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    val dateFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale("ro", "RO")) }
+    val dateFormat = remember { SimpleDateFormat("dd MMM yyyy", ROMANIAN) }
 
     // Meter indexes are whole numbers
     val newIndex = indexText.toLongOrNull()?.toDouble()
@@ -177,12 +181,12 @@ fun EditReadingDialog(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Consum nou calculat: ${String.format(Locale.getDefault(), "%.1f", newConsumption)} ${reading.utilityType.unit}",
+                            text = "Consum nou calculat: ${String.format(ROMANIAN, "%.1f", newConsumption)} ${reading.utilityType.unit}",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
                         )
                         Text(
-                            text = "Cost nou estimat: ${String.format(Locale.getDefault(), "%.2f", newCost)} LEI",
+                            text = "Cost nou estimat: ${String.format(ROMANIAN, "%.2f", newCost)} LEI",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.primary

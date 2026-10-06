@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,6 +32,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.UtilityType
 import java.util.Locale
+
+// A fixed locale: Locale.getDefault() read inside a composable does not trigger a recomposition
+// when the system language changes
+private val ROMANIAN: Locale = Locale.forLanguageTag("ro-RO")
 
 @Composable
 fun TransmitConfirmationDialog(
@@ -160,7 +163,7 @@ fun TransmitConfirmationDialog(
                         ) {
                             Text("Consum calculat:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                text = "+${String.format(Locale.getDefault(), "%.1f", consumption)} ${type.unit}",
+                                text = "+${String.format(ROMANIAN, "%.1f", consumption)} ${type.unit}",
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp
                             )
@@ -172,7 +175,7 @@ fun TransmitConfirmationDialog(
                         ) {
                             Text("Cost estimat:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                text = "${String.format(Locale.getDefault(), "%.2f", estimatedCost)} LEI",
+                                text = "${String.format(ROMANIAN, "%.2f", estimatedCost)} LEI",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.primary

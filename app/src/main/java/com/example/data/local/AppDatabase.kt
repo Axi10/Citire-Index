@@ -33,7 +33,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "meter_readings_v6.db"
                 )
                     .addCallback(DatabaseCallback())
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance
                 instance

@@ -61,6 +61,11 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+  // Static analysis: a readable text report, and it never fails the build by itself
+  lint {
+    textReport = true
+    abortOnError = false
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

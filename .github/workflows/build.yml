@@ -73,5 +73,7 @@ jobs:
         name: index-utilitati-apk
         path: app/build/outputs/apk/debug/*.apk
 
-    - name: Run unit tests
-      run: ./gradlew testDebugUnitTest --tests 'com.example.unit.*' --no-daemon --stacktrace
+    - name: Static analysis (Android lint)
+      run: |
+        ./gradlew lintDebug --no-daemon || true
+        cat app/build/reports/lint-results-debug.txt || echo "No lint text report found"

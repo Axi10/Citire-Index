@@ -21,7 +21,9 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
     companion object {
         const val CHANNEL_ID = "meter_reading_reminders"
         const val EXTRA_UTILITY_TYPE = "extra_utility_type"
+        const val EXTRA_IS_TEST = "extra_is_test"
         const val ACTION_REMINDER = "com.example.ACTION_REMINDER"
+        const val ACTION_FOLLOW_UP = "com.example.ACTION_FOLLOW_UP"
 
         fun ensureChannel(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -60,15 +62,38 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
                     UtilityType.GAS
                 }
 
-                val config = AppDatabase.getDatabase(appContext).configDao().getConfigSync(utilityType)
+                val database = AppDatabase.getDatabase(appContext)
+                val config = database.configDao().getConfigSync(utilityType)
                 val day = config?.reminderDayOfMonth ?: utilityType.defaultDay
                 val hour = config?.reminderHour ?: 9
                 val minute = config?.reminderMinute ?: 0
+                val remindersOn = config == null || config.isReminderEnabled
 
-                if (config == null || config.isReminderEnabled) {
+                // Second reminder: only if the index still was not transmitted for this cycle
+                if (intent.action == ACTION_FOLLOW_UP) {
+                    if (remindersOn) {
+                        val lastTransmitted = database.meterDao().getReadingsByTypeAsc(utilityType)
+                            .filter { it.isCallExecuted }
+                            .maxOfOrNull { it.timestamp }
+                        val status = ReminderScheduler.getSubmissionStatus(day, lastTransmitted)
+                        if (!status.isSubmittedForCurrentCycle) {
+                            showFollowUpNotification(appContext, utilityType, day)
+                        }
+                    }
+                    return@launch
+                }
+
+                // Test button in Settings: just show the notification
+                if (intent.getBooleanExtra(EXTRA_IS_TEST, false)) {
+                    showReminderNotification(appContext, utilityType, day)
+                    return@launch
+                }
+
+                if (remindersOn) {
                     showReminderNotification(appContext, utilityType, day)
                     // Reschedule for next month with the configured day / time
                     ReminderScheduler.scheduleNext(appContext, utilityType, day, hour, minute)
+                    ReminderScheduler.scheduleFollowUp(appContext, utilityType)
                 }
             } finally {
                 pendingResult.finish()
@@ -76,20 +101,24 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun showReminderNotification(context: Context, type: UtilityType, day: Int) {
-        ensureChannel(context)
-
+    private fun openAppIntent(context: Context, type: UtilityType): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             putExtra(EXTRA_UTILITY_TYPE, type.name)
         }
 
-        val pendingIntent = PendingIntent.getActivity(
+        return PendingIntent.getActivity(
             context,
             if (type == UtilityType.GAS) 101 else 102,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+    }
+
+    private fun showReminderNotification(context: Context, type: UtilityType, day: Int) {
+        ensureChannel(context)
+
+        val pendingIntent = openAppIntent(context, type)
 
         val title = if (type == UtilityType.GAS) {
             "🔥 Transmite indexul la Gaz (ziua $day a lunii)"
@@ -104,7 +133,24 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
         }
 
         val notificationId = if (type == UtilityType.GAS) 1001 else 1002
+        notify(context, notificationId, title, message, pendingIntent)
+    }
 
+    private fun showFollowUpNotification(context: Context, type: UtilityType, day: Int) {
+        ensureChannel(context)
+
+        val pendingIntent = openAppIntent(context, type)
+        val utility = if (type == UtilityType.GAS) "gaz" else "curent"
+
+        val title = "⏰ Încă nu ai transmis indexul la ${type.title}"
+        val message = "Termenul (ziua $day) a trecut, iar indexul pentru $utility nu apare transmis. " +
+            "Durează un minut: deschide aplicația și apasă Transmite."
+
+        val notificationId = if (type == UtilityType.GAS) 1003 else 1004
+        notify(context, notificationId, title, message, pendingIntent)
+    }
+
+    private fun notify(context: Context, id: Int, title: String, message: String, pendingIntent: PendingIntent) {
         // The status bar needs a monochrome icon: the launcher foreground shows up as a white square
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -122,6 +168,6 @@ class ReminderNotificationReceiver : BroadcastReceiver() {
             .build()
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(notificationId, notification)
+        notificationManager.notify(id, notification)
     }
 }

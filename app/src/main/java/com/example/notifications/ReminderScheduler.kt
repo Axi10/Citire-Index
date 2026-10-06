@@ -126,9 +126,17 @@ object ReminderScheduler {
 
     private fun requestCodeFor(type: UtilityType): Int = if (type == UtilityType.GAS) 201 else 202
 
+    private fun followUpRequestCodeFor(type: UtilityType): Int = if (type == UtilityType.GAS) 211 else 212
+
     private fun reminderIntent(context: Context, type: UtilityType): Intent =
         Intent(context, ReminderNotificationReceiver::class.java).apply {
             action = ReminderNotificationReceiver.ACTION_REMINDER
+            putExtra(ReminderNotificationReceiver.EXTRA_UTILITY_TYPE, type.name)
+        }
+
+    private fun followUpIntent(context: Context, type: UtilityType): Intent =
+        Intent(context, ReminderNotificationReceiver::class.java).apply {
+            action = ReminderNotificationReceiver.ACTION_FOLLOW_UP
             putExtra(ReminderNotificationReceiver.EXTRA_UTILITY_TYPE, type.name)
         }
 
@@ -200,20 +208,51 @@ object ReminderScheduler {
     }
 
     /**
-     * Removes the scheduled reminder for the given utility (used when reminders are disabled).
+     * Schedules a second, gentler reminder a couple of days after the due date. When it fires the
+     * receiver checks the database and stays silent if the index was transmitted meanwhile.
      */
-    fun cancel(context: Context, type: UtilityType) {
+    fun scheduleFollowUp(context: Context, type: UtilityType, daysFromNow: Int = 2, hour: Int = 18) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+        val fireAt = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, daysFromNow)
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            followUpRequestCodeFor(type),
+            followUpIntent(context, type),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // A reminder a few minutes late is fine, so no exact alarm (and no extra permission) needed
+        alarmManager.set(AlarmManager.RTC_WAKEUP, fireAt.timeInMillis, pendingIntent)
+    }
+
+    private fun cancelPending(context: Context, requestCode: Int, intent: Intent) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            requestCodeFor(type),
-            reminderIntent(context, type),
+            requestCode,
+            intent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
         if (pendingIntent != null) {
             alarmManager.cancel(pendingIntent)
             pendingIntent.cancel()
         }
+    }
+
+    /**
+     * Removes the scheduled reminders for the given utility (used when reminders are disabled).
+     */
+    fun cancel(context: Context, type: UtilityType) {
+        cancelPending(context, requestCodeFor(type), reminderIntent(context, type))
+        cancelPending(context, followUpRequestCodeFor(type), followUpIntent(context, type))
     }
 
     /**
@@ -248,8 +287,12 @@ object ReminderScheduler {
 
     /**
      * Instantly triggers a test notification so the user can see how it looks and works.
+     * It only shows the notification: nothing is rescheduled.
      */
     fun sendImmediateTestNotification(context: Context, type: UtilityType) {
-        context.sendBroadcast(reminderIntent(context, type))
+        val intent = reminderIntent(context, type).apply {
+            putExtra(ReminderNotificationReceiver.EXTRA_IS_TEST, true)
+        }
+        context.sendBroadcast(intent)
     }
 }

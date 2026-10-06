@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -44,8 +43,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,7 +65,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.model.UtilityConfig
 import com.example.data.model.UtilityType
+import com.example.telecom.CallHelper
 import com.example.telecom.CallLogHelper
+import com.example.telecom.IvrSequenceBuilder
 import com.example.ui.theme.CostGreen
 import com.example.ui.theme.ElectricityAmber
 import com.example.ui.theme.GasCyan
@@ -118,6 +121,16 @@ fun SettingsScreen(
         hasCallLogPermission = isGranted || CallLogHelper.hasCallLogPermission(context)
     }
 
+    // Test call: needs the phone permission; the utility to test is remembered while it is asked
+    var pendingTestCallType by remember { mutableStateOf<UtilityType?>(null) }
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        val type = pendingTestCallType
+        pendingTestCallType = null
+        if (type != null) onTestCall(type, isGranted)
+    }
+
     // Edit Dialog (Only opens when user explicitly taps "Modifică")
     configToEdit?.let { type ->
         val currentCfg = if (type == UtilityType.GAS) gasConfig else electricityConfig
@@ -157,7 +170,63 @@ fun SettingsScreen(
             onEdit = { configToEdit = UtilityType.ELECTRICITY }
         )
 
-        // Card 3: Permissions
+        // Card 3: Quick tests
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Teste rapide",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Apelul de test sună robotul și se oprește când cere indexul: nu transmite nimic. " +
+                        "Folosește-l ca să verifici codul de client și șablonul de apel.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                for (type in UtilityType.values()) {
+                    val config = if (type == UtilityType.GAS) gasConfig else electricityConfig
+                    val hasClientCode = config?.clientCode?.isNotBlank() == true
+                    val shortName = if (type == UtilityType.GAS) "gaz" else "curent"
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onTestNotification(type) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Notificare $shortName", fontSize = 11.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (CallHelper.hasCallPermission(context)) {
+                                    onTestCall(type, true)
+                                } else {
+                                    pendingTestCallType = type
+                                    callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                                }
+                            },
+                            enabled = hasClientCode,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Apel test $shortName", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Card 4: Permissions
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -369,7 +438,8 @@ private fun MinimalUtilityCard(
                 ) {
                     ConfigInfoTile(
                         label = "Cod Client",
-                        value = code,
+                        value = code.ifBlank { "Necompletat" },
+                        valueColor = if (code.isBlank()) Color(0xFFE65100) else null,
                         modifier = Modifier.weight(1f)
                     )
                     ConfigInfoTile(
@@ -387,7 +457,8 @@ private fun MinimalUtilityCard(
 private fun ConfigInfoTile(
     label: String,
     value: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    valueColor: Color? = null
 ) {
     Surface(
         modifier = modifier,
@@ -407,7 +478,7 @@ private fun ConfigInfoTile(
                 text = value,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = valueColor ?: MaterialTheme.colorScheme.onSurface
             )
         }
     }
@@ -425,18 +496,22 @@ private fun EditConfigModal(
     var codeText by remember { mutableStateOf(currentConfig?.clientCode ?: type.defaultClientCode) }
     var phoneText by remember { mutableStateOf(currentConfig?.phoneNumber ?: type.defaultPhone) }
     var reminderEnabled by remember { mutableStateOf(currentConfig?.isReminderEnabled ?: true) }
+    var templateText by remember { mutableStateOf(currentConfig?.ivrTemplate ?: type.defaultIvrTemplate) }
+    var showAdvanced by remember { mutableStateOf(false) }
 
     // Romanian keyboards type a decimal comma (3,02), so accept both separators
     val price = priceText.trim().replace(',', '.').toDoubleOrNull()
     val day = dayText.trim().toIntOrNull()
     val code = codeText.trim()
     val phone = phoneText.trim()
+    val template = templateText.trim()
 
     val priceError = price == null || price <= 0.0
     val dayError = day == null || day !in 1..31
     val codeError = code.isEmpty() || !code.all { it.isDigit() }
     val phoneError = phone.length < 3 || !phone.all { it.isDigit() || it == '+' }
-    val hasError = priceError || dayError || codeError || phoneError
+    val templateError = !IvrSequenceBuilder.isValidTemplate(template)
+    val hasError = priceError || dayError || codeError || phoneError || templateError
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -508,6 +583,35 @@ private fun EditConfigModal(
                     Text("Notificări lunare", fontSize = 14.sp)
                     Switch(checked = reminderEnabled, onCheckedChange = { reminderEnabled = it })
                 }
+
+                TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                    Text(if (showAdvanced) "Ascunde setările avansate" else "Setări avansate (șablon apel)", fontSize = 12.sp)
+                }
+
+                // Shown automatically when the stored template is not valid, so it can be fixed
+                if (showAdvanced || templateError) {
+                    OutlinedTextField(
+                        value = templateText,
+                        onValueChange = { templateText = it },
+                        label = { Text("Șablon apel") },
+                        singleLine = true,
+                        isError = templateError,
+                        supportingText = {
+                            Text(
+                                if (templateError) {
+                                    "Trebuie să conțină o singură dată XXXX și doar cifre, virgule, # sau *"
+                                } else {
+                                    "XXXX = locul indexului, virgula = pauză de 2-3 secunde"
+                                }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    TextButton(onClick = { templateText = type.ivrTemplateFor(phone, code) }) {
+                        Text("Resetează șablonul la cel implicit", fontSize = 12.sp)
+                    }
+                }
             }
         },
         confirmButton = {
@@ -518,12 +622,13 @@ private fun EditConfigModal(
                             utilityType = type,
                             phoneNumber = phone,
                             clientCode = code,
-                            ivrTemplate = type.defaultIvrTemplate,
+                            ivrTemplate = template,
                             unitPrice = price,
                             reminderDayOfMonth = day
                         )).copy(
                             phoneNumber = phone,
                             clientCode = code,
+                            ivrTemplate = template,
                             unitPrice = price,
                             reminderDayOfMonth = day,
                             isReminderEnabled = reminderEnabled

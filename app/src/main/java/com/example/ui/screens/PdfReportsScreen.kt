@@ -19,18 +19,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -69,6 +68,7 @@ fun PdfReportsScreen(
     readings: List<MeterReading>,
     lastGeneratedFile: File?,
     onExportPdf: (periodName: String, sinceMs: Long?) -> Unit,
+    onExportCsv: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -437,6 +437,20 @@ fun PdfReportsScreen(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Re-trimite ultimul raport (${lastGeneratedFile.name.take(22)}...)", fontSize = 12.5.sp)
             }
+        }
+
+        // 7. Backup of the whole history, which also opens in Excel
+        OutlinedButton(
+            onClick = onExportCsv,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .testTag("export_csv_button"),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(imageVector = Icons.Default.TableChart, contentDescription = null, modifier = Modifier.size(17.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Exportă tot istoricul (CSV, pentru Excel)", fontSize = 12.5.sp)
         }
 
         Spacer(modifier = Modifier.height(10.dp))

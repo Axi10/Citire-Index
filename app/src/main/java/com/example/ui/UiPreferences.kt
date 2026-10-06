@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.content.Context
+import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,8 +29,6 @@ object UiPreferences {
         _dynamicColor.value = enabled
         context.applicationContext
             .getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_DYNAMIC_COLOR, enabled)
-            .apply()
+            .edit { putBoolean(KEY_DYNAMIC_COLOR, enabled) }
     }
 }

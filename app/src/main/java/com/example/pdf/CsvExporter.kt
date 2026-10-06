@@ -19,10 +19,13 @@ object CsvExporter {
     private const val SEPARATOR = ";"
     private val ROMANIAN = Locale("ro", "RO")
 
+    // U+FEFF at the start tells Excel the file is UTF-8, so diacritics are shown correctly
+    private val BYTE_ORDER_MARK = Char(0xFEFF)
+
     fun buildCsv(readings: List<MeterReading>): String {
         val dateFormat = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
         val builder = StringBuilder()
-        builder.append('﻿')
+        builder.append(BYTE_ORDER_MARK)
         builder.append(
             listOf("Data", "Utilitate", "Index", "Index anterior", "Consum", "Pret unitar", "Cost estimat", "Apel efectuat")
                 .joinToString(SEPARATOR)

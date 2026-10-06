@@ -13,13 +13,15 @@ object CsvImporter {
 
     data class Result(val readings: List<MeterReading>, val skippedLines: Int)
 
+    private val BYTE_ORDER_MARK = Char(0xFEFF)
+
     fun parse(text: String): Result {
         val dateFormat = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).apply { isLenient = false }
 
         val readings = mutableListOf<MeterReading>()
         var skipped = 0
 
-        val lines = text.removePrefix("﻿").lines().filter { it.isNotBlank() }
+        val lines = text.trimStart(BYTE_ORDER_MARK).lines().filter { it.isNotBlank() }
         for ((position, line) in lines.withIndex()) {
             val columns = line.split(';').map { it.trim().trim('"').trim() }
 

@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout repository
@@ -72,6 +74,16 @@ jobs:
       with:
         name: index-utilitati-apk
         path: app/build/outputs/apk/debug/*.apk
+
+    - name: Publish APK as a GitHub Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        cp app/build/outputs/apk/debug/*.apk index-utilitati.apk
+        gh release create "v1.1.${{ github.run_number }}" index-utilitati.apk \
+          --target "${{ github.sha }}" \
+          --title "Index Utilitati 1.1.${{ github.run_number }}" \
+          --notes "APK generat automat din commit ${{ github.sha }}. Descarca index-utilitati.apk si instaleaza-l pe telefon."
 
     - name: Static analysis (Android lint)
       run: |

@@ -9,6 +9,10 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// On GitHub Actions every build gets a higher version code than the previous one, which Android
+// requires for an APK to install over the existing app. Local builds keep version code 1.
+val ciRunNumber: Int? = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -17,8 +21,8 @@ android {
     applicationId = "com.aistudio.indexutilitati.wkrfvb"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = ciRunNumber ?: 1
+    versionName = if (ciRunNumber != null) "1.1.$ciRunNumber" else "1.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

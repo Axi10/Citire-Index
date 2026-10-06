@@ -10,6 +10,7 @@ import com.example.data.model.UtilityConfig
 import com.example.data.model.UtilityType
 import com.example.data.repository.MeterRepository
 import com.example.notifications.ReminderScheduler
+import com.example.pdf.CsvExporter
 import com.example.pdf.PdfReportGenerator
 import com.example.telecom.CallHelper
 import com.example.telecom.CallLogHelper
@@ -106,6 +107,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (type == UtilityType.GAS) gas else elec
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    // When the selected utility was last really transmitted. A reading that was only saved does
+    // not count: it must not make the app say the index was already sent.
+    val currentLastTransmittedAt: StateFlow<Long?> = combine(
+        _activeUtility, allReadings
+    ) { type, readings ->
+        readings.filter { it.utilityType == type && it.isCallExecuted }.maxOfOrNull { it.timestamp }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     fun setTab(index: Int) {
         _selectedTab.value = index
     }
@@ -152,6 +161,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return IvrSequenceBuilder.buildDialString(template, indexForDial)
     }
 
+    private fun configFor(type: UtilityType): UtilityConfig? =
+        if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
+
+    private fun clientCodeMissing(type: UtilityType): Boolean =
+        configFor(type)?.clientCode.isNullOrBlank()
+
     /**
      * Transmit and call: Saves reading to database and places call (direct or dialer)
      */
@@ -163,7 +178,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val type = _activeUtility.value
-        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
+        if (clientCodeMissing(type)) {
+            _userMessage.value = "Completăm întâi codul de client la Setări, altfel robotul nu te poate identifica."
+            return
+        }
+
+        val config = configFor(type)
         val prevReading = if (type == UtilityType.GAS) latestGasReading.value else latestElectricityReading.value
 
         val prevVal = prevReading?.indexValue
@@ -283,8 +303,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
-        val expectedPhone = config?.phoneNumber ?: type.defaultPhone
+        val expectedPhone = configFor(type)?.phoneNumber ?: type.defaultPhone
 
         verifying = true
         viewModelScope.launch {
@@ -333,7 +352,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val type = _activeUtility.value
-        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
+        val config = configFor(type)
         val prevReading = if (type == UtilityType.GAS) latestGasReading.value else latestElectricityReading.value
 
         val prevVal = prevReading?.indexValue
@@ -375,22 +394,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Works out the dial template to store with a saved config.
+     *
+     * - If the user edited the template, it is kept as typed.
+     * - If it was still the default template, it is rebuilt from the new phone / client code.
+     * - If it was customised earlier, the old client code / phone inside it are replaced.
+     */
+    private fun resolveTemplate(previous: UtilityConfig?, config: UtilityConfig): String {
+        val type = config.utilityType
+        if (previous == null) return type.ivrTemplateFor(config.phoneNumber, config.clientCode)
+        if (config.ivrTemplate != previous.ivrTemplate) return config.ivrTemplate
+
+        val wasDefault = previous.ivrTemplate == type.ivrTemplateFor(previous.phoneNumber, previous.clientCode)
+        if (wasDefault) return type.ivrTemplateFor(config.phoneNumber, config.clientCode)
+
+        var template = config.ivrTemplate
+        if (previous.clientCode.isNotBlank() && previous.clientCode != config.clientCode) {
+            template = template.replace(previous.clientCode, config.clientCode)
+        }
+        if (previous.phoneNumber.isNotBlank() && previous.phoneNumber != config.phoneNumber) {
+            template = template.replace(previous.phoneNumber, config.phoneNumber)
+        }
+        return template
+    }
+
     fun updateConfig(config: UtilityConfig) {
         viewModelScope.launch {
-            val previous = if (config.utilityType == UtilityType.GAS) gasConfig.value else electricityConfig.value
-
-            // The dial template embeds the client code and the phone number, so keep it in
-            // sync when the user edits them in Settings.
-            var template = config.ivrTemplate
-            if (previous != null) {
-                if (previous.clientCode.isNotBlank() && previous.clientCode != config.clientCode) {
-                    template = template.replace(previous.clientCode, config.clientCode)
-                }
-                if (previous.phoneNumber.isNotBlank() && previous.phoneNumber != config.phoneNumber) {
-                    template = template.replace(previous.phoneNumber, config.phoneNumber)
-                }
-            }
-            val updated = config.copy(ivrTemplate = template)
+            val previous = configFor(config.utilityType)
+            val updated = config.copy(ivrTemplate = resolveTemplate(previous, config))
 
             repository.saveConfig(updated)
 
@@ -423,8 +455,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * that the robot receives the client code and asks for the index.
      */
     fun triggerTestCall(context: Context, type: UtilityType, directCall: Boolean = true) {
-        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
-        val template = config?.ivrTemplate ?: type.defaultIvrTemplate
+        if (clientCodeMissing(type)) {
+            _userMessage.value = "Completăm întâi codul de client pentru ${type.title}."
+            return
+        }
+
+        val template = configFor(type)?.ivrTemplate ?: type.defaultIvrTemplate
         val testSequence = IvrSequenceBuilder.buildTestSequenceUntilIndex(template)
 
         if (directCall) {
@@ -465,6 +501,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 PdfReportGenerator.sharePdf(context, pdfFile)
             } else {
                 _userMessage.value = "Eroare la generarea fișierului PDF."
+            }
+        }
+    }
+
+    /**
+     * Exports the whole history as a CSV file, as a backup that also opens in Excel.
+     */
+    fun exportCsv(context: Context) {
+        viewModelScope.launch {
+            val readings = allReadings.value
+            if (readings.isEmpty()) {
+                _userMessage.value = "Nu există citiri de exportat."
+                return@launch
+            }
+
+            val csvFile = withContext(Dispatchers.IO) { CsvExporter.generate(context, readings) }
+            if (csvFile != null && csvFile.exists()) {
+                CsvExporter.share(context, csvFile)
+            } else {
+                _userMessage.value = "Eroare la exportul CSV."
             }
         }
     }

@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -69,10 +73,18 @@ fun PdfReportsScreen(
     lastGeneratedFile: File?,
     onExportPdf: (periodName: String, sinceMs: Long?) -> Unit,
     onExportCsv: () -> Unit,
+    onImportCsv: (Uri) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+
+    // System file picker for restoring a CSV made by "Export"
+    val csvPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) onImportCsv(uri)
+    }
 
     val currentMonthFormat = SimpleDateFormat("MMMM yyyy", Locale("ro", "RO"))
     val currentMonthLabel = remember { currentMonthFormat.format(Date()).replaceFirstChar { it.uppercase() } }
@@ -439,19 +451,52 @@ fun PdfReportsScreen(
             }
         }
 
-        // 7. Backup of the whole history, which also opens in Excel
-        OutlinedButton(
-            onClick = onExportCsv,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(46.dp)
-                .testTag("export_csv_button"),
-            shape = RoundedCornerShape(12.dp)
+        // 7. Backup and restore of the whole history; the CSV also opens in Excel
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(imageVector = Icons.Default.TableChart, contentDescription = null, modifier = Modifier.size(17.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Exportă tot istoricul (CSV, pentru Excel)", fontSize = 12.5.sp)
+            OutlinedButton(
+                onClick = onExportCsv,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("export_csv_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(imageVector = Icons.Default.TableChart, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Export CSV", fontSize = 12.5.sp)
+            }
+
+            OutlinedButton(
+                onClick = {
+                    csvPicker.launch(
+                        arrayOf(
+                            "text/csv",
+                            "text/comma-separated-values",
+                            "application/csv",
+                            "application/vnd.ms-excel",
+                            "text/plain"
+                        )
+                    )
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("import_csv_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(imageVector = Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Import CSV", fontSize = 12.5.sp)
+            }
         }
+        Text(
+            text = "Exportul salvează tot istoricul. Importul îl pune la loc, fără să dubleze citirile existente.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         Spacer(modifier = Modifier.height(10.dp))
     }

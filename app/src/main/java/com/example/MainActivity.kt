@@ -234,7 +234,8 @@ fun MainScreen(viewModel: MainViewModel) {
                     readings = allReadings,
                     lastGeneratedFile = lastGeneratedPdf,
                     onExportPdf = { periodName, sinceMs -> viewModel.exportPdfReport(context, periodName, sinceMs) },
-                    onExportCsv = { viewModel.exportCsv(context) }
+                    onExportCsv = { viewModel.exportCsv(context) },
+                    onImportCsv = { uri -> viewModel.importCsv(context, uri) }
                 )
 
                 3 -> SettingsScreen(

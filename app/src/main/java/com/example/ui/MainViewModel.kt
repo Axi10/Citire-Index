@@ -2,6 +2,7 @@ package com.example.ui
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
@@ -11,6 +12,7 @@ import com.example.data.model.UtilityType
 import com.example.data.repository.MeterRepository
 import com.example.notifications.ReminderScheduler
 import com.example.pdf.CsvExporter
+import com.example.pdf.CsvImporter
 import com.example.pdf.PdfReportGenerator
 import com.example.telecom.CallHelper
 import com.example.telecom.CallLogHelper
@@ -521,6 +523,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 CsvExporter.share(context, csvFile)
             } else {
                 _userMessage.value = "Eroare la exportul CSV."
+            }
+        }
+    }
+
+    /**
+     * Restores readings from a CSV file made by [exportCsv]. Readings that are already stored
+     * (same utility, minute and index) are not added twice, so importing the same file again
+     * is harmless.
+     */
+    fun importCsv(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                try {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            if (text == null) {
+                _userMessage.value = "Nu am putut citi fișierul ales."
+                return@launch
+            }
+
+            val parsed = CsvImporter.parse(text)
+            if (parsed.readings.isEmpty()) {
+                _userMessage.value = "Fișierul nu conține citiri valide."
+                return@launch
+            }
+
+            val known = mutableSetOf<Triple<UtilityType, Long, Double>>()
+            for (type in UtilityType.values()) {
+                repository.getReadingsByTypeAsc(type).forEach {
+                    known.add(Triple(type, it.timestamp / 60_000L, it.indexValue))
+                }
+            }
+
+            var added = 0
+            val touched = mutableSetOf<UtilityType>()
+            for (reading in parsed.readings) {
+                val key = Triple(reading.utilityType, reading.timestamp / 60_000L, reading.indexValue)
+                if (known.add(key)) {
+                    repository.insertReading(reading)
+                    touched.add(reading.utilityType)
+                    added++
+                }
+            }
+            touched.forEach { recalculateChain(it) }
+
+            val duplicates = parsed.readings.size - added
+            _userMessage.value = buildString {
+                append("Importate $added citiri")
+                if (duplicates > 0) append(" ($duplicates existau deja)")
+                if (parsed.skippedLines > 0) append(", ${parsed.skippedLines} linii ignorate")
+                append(".")
             }
         }
     }

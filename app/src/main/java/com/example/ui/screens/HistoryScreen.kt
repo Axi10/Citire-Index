@@ -49,8 +49,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.MeterReading
 import com.example.data.model.UtilityType
+import com.example.data.stats.InsightsCalculator
 import com.example.ui.components.ConsumptionChart
 import com.example.ui.components.EditReadingDialog
+import com.example.ui.components.InsightsCard
 import com.example.ui.components.MetricCard
 import com.example.ui.theme.CostGreen
 import com.example.ui.theme.ElectricityAmber
@@ -81,6 +83,10 @@ fun HistoryScreen(
 
     val totalConsumption = remember(filteredReadings) {
         filteredReadings.sumOf { it.consumption }
+    }
+
+    val insights = remember(filteredReadings) {
+        InsightsCalculator.compute(filteredReadings)
     }
 
     // Readings are sorted newest first, so the first one carries the current tariff
@@ -244,7 +250,16 @@ fun HistoryScreen(
             }
         }
 
-        // 3. Evolution Chart for Selected Utility Only
+        // 3. Trends: average, change versus the previous reading, cost of the last year
+        item {
+            InsightsCard(
+                insights = insights,
+                unit = selectedUtility.unit,
+                accentColor = accentColor
+            )
+        }
+
+        // 4. Evolution Chart for Selected Utility Only
         item {
             ConsumptionChart(
                 readings = filteredReadings,
@@ -252,7 +267,7 @@ fun HistoryScreen(
             )
         }
 
-        // 4. Readings List Header
+        // 5. Readings List Header
         item {
             Text(
                 text = "Citiri ${selectedUtility.title}",

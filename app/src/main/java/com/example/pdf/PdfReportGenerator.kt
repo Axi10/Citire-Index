@@ -282,8 +282,10 @@ object PdfReportGenerator {
         paint.textSize = 8.5f
         val gasDay = gasConfig?.reminderDayOfMonth ?: UtilityType.GAS.defaultDay
         val elecDay = electricityConfig?.reminderDayOfMonth ?: UtilityType.ELECTRICITY.defaultDay
-        val gasInfo = "Gaz: TelVerde ${gasConfig?.phoneNumber ?: UtilityType.GAS.defaultPhone} | Cod Client: ${gasConfig?.clientCode ?: UtilityType.GAS.defaultClientCode} | Termen: $gasDay ale lunii"
-        val elecInfo = "Curent: TelVerde ${electricityConfig?.phoneNumber ?: UtilityType.ELECTRICITY.defaultPhone} | Cod Client: ${electricityConfig?.clientCode ?: UtilityType.ELECTRICITY.defaultClientCode} | Termen: $elecDay ale lunii"
+        val gasCode = gasConfig?.clientCode?.ifBlank { null } ?: "necompletat"
+        val elecCode = electricityConfig?.clientCode?.ifBlank { null } ?: "necompletat"
+        val gasInfo = "Gaz: TelVerde ${gasConfig?.phoneNumber ?: UtilityType.GAS.defaultPhone} | Cod Client: $gasCode | Termen: $gasDay ale lunii"
+        val elecInfo = "Curent: TelVerde ${electricityConfig?.phoneNumber ?: UtilityType.ELECTRICITY.defaultPhone} | Cod Client: $elecCode | Termen: $elecDay ale lunii"
         canvas.drawText(gasInfo, 40f, top + 38f, paint)
         canvas.drawText(elecInfo, 40f, top + 54f, paint)
     }

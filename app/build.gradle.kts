@@ -15,7 +15,9 @@ val ciRunNumber: Int? = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  // The updated AndroidX libraries need the newest APIs to compile against. targetSdk below is a
+  // separate setting: it decides which runtime behaviour changes the app opts in to.
+  compileSdk { version = release(37) { minorApiLevel = 2 } }
 
   defaultConfig {
     applicationId = "com.aistudio.indexutilitati.wkrfvb"

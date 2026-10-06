@@ -25,7 +25,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
@@ -51,6 +50,10 @@ fun ConsumptionChart(
     selectedType: UtilityType?,
     modifier: Modifier = Modifier
 ) {
+    // Read from the theme here: the Canvas draw scope below cannot read composition locals
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -141,7 +144,7 @@ fun ConsumptionChart(
                     val dualBarWidth = 12.dp.toPx()
 
                     val textPaint = android.graphics.Paint().apply {
-                        color = android.graphics.Color.rgb(100, 116, 139)
+                        color = labelColor
                         textSize = 11.sp.toPx()
                         textAlign = android.graphics.Paint.Align.CENTER
                         isAntiAlias = true
@@ -154,8 +157,6 @@ fun ConsumptionChart(
                         isAntiAlias = true
                         isFakeBoldText = true
                     }
-
-                    val trackColor = Color(0xFFF1F5F9)
 
                     monthlyData.forEachIndexed { index, data ->
                         val centerX = slotWidth * index + slotWidth / 2f
@@ -249,7 +250,7 @@ fun ConsumptionChart(
                                     size = Size(singleBarWidth, gasBarHeight),
                                     cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
                                 )
-                                valuePaint.color = android.graphics.Color.rgb(2, 132, 199)
+                                valuePaint.color = GasCyan.toArgb()
                                 drawContext.canvas.nativeCanvas.drawText(
                                     String.format(Locale.US, "%.0f m³", data.gasConsumption),
                                     centerX,
@@ -257,7 +258,7 @@ fun ConsumptionChart(
                                     valuePaint
                                 )
                             } else {
-                                valuePaint.color = android.graphics.Color.LTGRAY
+                                valuePaint.color = labelColor
                                 drawContext.canvas.nativeCanvas.drawText(
                                     "-",
                                     centerX,
@@ -288,7 +289,7 @@ fun ConsumptionChart(
                                     size = Size(singleBarWidth, elecBarHeight),
                                     cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
                                 )
-                                valuePaint.color = android.graphics.Color.rgb(217, 119, 6)
+                                valuePaint.color = ElectricityAmber.toArgb()
                                 drawContext.canvas.nativeCanvas.drawText(
                                     String.format(Locale.US, "%.0f kWh", data.electricityConsumption),
                                     centerX,
@@ -296,7 +297,7 @@ fun ConsumptionChart(
                                     valuePaint
                                 )
                             } else {
-                                valuePaint.color = android.graphics.Color.LTGRAY
+                                valuePaint.color = labelColor
                                 drawContext.canvas.nativeCanvas.drawText(
                                     "-",
                                     centerX,

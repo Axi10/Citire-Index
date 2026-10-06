@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -42,7 +41,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -55,15 +56,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.BuildConfig
 import com.example.data.model.UtilityConfig
 import com.example.data.model.UtilityType
+import com.example.telecom.CallHelper
 import com.example.telecom.CallLogHelper
+import com.example.telecom.IvrSequenceBuilder
 import com.example.ui.theme.CostGreen
 import com.example.ui.theme.ElectricityAmber
 import com.example.ui.theme.GasCyan
@@ -75,6 +80,8 @@ fun SettingsScreen(
     onSaveConfig: (UtilityConfig) -> Unit,
     onTestNotification: (UtilityType) -> Unit,
     onTestCall: (type: UtilityType, directCall: Boolean) -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColorChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -117,6 +124,16 @@ fun SettingsScreen(
         hasCallLogPermission = isGranted || CallLogHelper.hasCallLogPermission(context)
     }
 
+    // Test call: needs the phone permission; the utility to test is remembered while it is asked
+    var pendingTestCallType by remember { mutableStateOf<UtilityType?>(null) }
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        val type = pendingTestCallType
+        pendingTestCallType = null
+        if (type != null) onTestCall(type, isGranted)
+    }
+
     // Edit Dialog (Only opens when user explicitly taps "Modifică")
     configToEdit?.let { type ->
         val currentCfg = if (type == UtilityType.GAS) gasConfig else electricityConfig
@@ -156,7 +173,92 @@ fun SettingsScreen(
             onEdit = { configToEdit = UtilityType.ELECTRICITY }
         )
 
-        // Card 3: Permissions
+        // Card 3: Quick tests
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Teste rapide",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Apelul de test sună robotul și se oprește când cere indexul: nu transmite nimic. " +
+                        "Folosește-l ca să verifici codul de client și șablonul de apel.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                for (type in UtilityType.values()) {
+                    val config = if (type == UtilityType.GAS) gasConfig else electricityConfig
+                    val hasClientCode = config?.clientCode?.isNotBlank() == true
+                    val shortName = if (type == UtilityType.GAS) "gaz" else "curent"
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onTestNotification(type) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Notificare $shortName", fontSize = 11.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (CallHelper.hasCallPermission(context)) {
+                                    onTestCall(type, true)
+                                } else {
+                                    pendingTestCallType = type
+                                    callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                                }
+                            },
+                            enabled = hasClientCode,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Apel test $shortName", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Card 4: Look. Material You takes its colours from the wallpaper (Android 12+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Culori dinamice (Material You)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Folosește culorile din fundalul telefonului. Gazul rămâne albastru, curentul galben.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(checked = dynamicColor, onCheckedChange = onDynamicColorChange)
+                }
+            }
+        }
+
+        // Card 5: Permissions
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -279,6 +381,17 @@ fun SettingsScreen(
                 }
             }
         }
+
+        // Which build is installed (1.1.<CI run number>)
+        Text(
+            text = "Versiune ${BuildConfig.VERSION_NAME}",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+        )
     }
 }
 
@@ -292,6 +405,7 @@ private fun MinimalUtilityCard(
 ) {
     val price = config?.unitPrice ?: type.defaultPrice
     val day = config?.reminderDayOfMonth ?: type.defaultDay
+    val remindersOn = config?.isReminderEnabled ?: true
     val code = config?.clientCode ?: type.defaultClientCode
     val phone = config?.phoneNumber ?: type.defaultPhone
 
@@ -357,7 +471,7 @@ private fun MinimalUtilityCard(
                     )
                     ConfigInfoTile(
                         label = "Zi notificare",
-                        value = "Ziua $day a lunii",
+                        value = if (remindersOn) "Ziua $day a lunii" else "Dezactivat",
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -367,7 +481,8 @@ private fun MinimalUtilityCard(
                 ) {
                     ConfigInfoTile(
                         label = "Cod Client",
-                        value = code,
+                        value = code.ifBlank { "Necompletat" },
+                        valueColor = if (code.isBlank()) Color(0xFFE65100) else null,
                         modifier = Modifier.weight(1f)
                     )
                     ConfigInfoTile(
@@ -385,7 +500,8 @@ private fun MinimalUtilityCard(
 private fun ConfigInfoTile(
     label: String,
     value: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    valueColor: Color? = null
 ) {
     Surface(
         modifier = modifier,
@@ -405,7 +521,7 @@ private fun ConfigInfoTile(
                 text = value,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = valueColor ?: MaterialTheme.colorScheme.onSurface
             )
         }
     }
@@ -422,6 +538,23 @@ private fun EditConfigModal(
     var dayText by remember { mutableStateOf((currentConfig?.reminderDayOfMonth ?: type.defaultDay).toString()) }
     var codeText by remember { mutableStateOf(currentConfig?.clientCode ?: type.defaultClientCode) }
     var phoneText by remember { mutableStateOf(currentConfig?.phoneNumber ?: type.defaultPhone) }
+    var reminderEnabled by remember { mutableStateOf(currentConfig?.isReminderEnabled ?: true) }
+    var templateText by remember { mutableStateOf(currentConfig?.ivrTemplate ?: type.defaultIvrTemplate) }
+    var showAdvanced by remember { mutableStateOf(false) }
+
+    // Romanian keyboards type a decimal comma (3,02), so accept both separators
+    val price = priceText.trim().replace(',', '.').toDoubleOrNull()
+    val day = dayText.trim().toIntOrNull()
+    val code = codeText.trim()
+    val phone = phoneText.trim()
+    val template = templateText.trim()
+
+    val priceError = price == null || price <= 0.0
+    val dayError = day == null || day !in 1..31
+    val codeError = code.isEmpty() || !code.all { it.isDigit() }
+    val phoneError = phone.length < 3 || !phone.all { it.isDigit() || it == '+' }
+    val templateError = !IvrSequenceBuilder.isValidTemplate(template)
+    val hasError = priceError || dayError || codeError || phoneError || templateError
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -433,13 +566,18 @@ private fun EditConfigModal(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedTextField(
                     value = priceText,
                     onValueChange = { priceText = it },
                     label = { Text("Preț (lei/${type.unit})") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
+                    isError = priceError,
+                    supportingText = { if (priceError) Text("Introdu un preț valid, de exemplu 3,02") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
@@ -450,6 +588,8 @@ private fun EditConfigModal(
                     label = { Text("Zi notificare lunară (1-31)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
+                    isError = dayError,
+                    supportingText = { if (dayError) Text("Alege o zi între 1 și 31") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
@@ -460,6 +600,8 @@ private fun EditConfigModal(
                     label = { Text("Cod Client") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
+                    isError = codeError,
+                    supportingText = { if (codeError) Text("Codul de client conține doar cifre") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
@@ -470,31 +612,74 @@ private fun EditConfigModal(
                     label = { Text("Număr TelVerde") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
+                    isError = phoneError,
+                    supportingText = { if (phoneError) Text("Introdu un număr de telefon valid") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp)
                 )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Notificări lunare", fontSize = 14.sp)
+                    Switch(checked = reminderEnabled, onCheckedChange = { reminderEnabled = it })
+                }
+
+                TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                    Text(if (showAdvanced) "Ascunde setările avansate" else "Setări avansate (șablon apel)", fontSize = 12.sp)
+                }
+
+                // Shown automatically when the stored template is not valid, so it can be fixed
+                if (showAdvanced || templateError) {
+                    OutlinedTextField(
+                        value = templateText,
+                        onValueChange = { templateText = it },
+                        label = { Text("Șablon apel") },
+                        singleLine = true,
+                        isError = templateError,
+                        supportingText = {
+                            Text(
+                                if (templateError) {
+                                    "Trebuie să conțină o singură dată XXXX și doar cifre, virgule, # sau *"
+                                } else {
+                                    "XXXX = locul indexului, virgula = pauză de 2-3 secunde"
+                                }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    TextButton(onClick = { templateText = type.ivrTemplateFor(phone, code) }) {
+                        Text("Resetează șablonul la cel implicit", fontSize = 12.sp)
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val p = priceText.toDoubleOrNull() ?: type.defaultPrice
-                    val d = dayText.toIntOrNull()?.coerceIn(1, 31) ?: type.defaultDay
-                    val updated = (currentConfig ?: UtilityConfig(
-                        utilityType = type,
-                        phoneNumber = phoneText,
-                        clientCode = codeText,
-                        ivrTemplate = type.defaultIvrTemplate,
-                        unitPrice = p,
-                        reminderDayOfMonth = d
-                    )).copy(
-                        phoneNumber = phoneText,
-                        clientCode = codeText,
-                        unitPrice = p,
-                        reminderDayOfMonth = d
-                    )
-                    onSave(updated)
+                    if (!hasError && price != null && day != null) {
+                        val updated = (currentConfig ?: UtilityConfig(
+                            utilityType = type,
+                            phoneNumber = phone,
+                            clientCode = code,
+                            ivrTemplate = template,
+                            unitPrice = price,
+                            reminderDayOfMonth = day
+                        )).copy(
+                            phoneNumber = phone,
+                            clientCode = code,
+                            ivrTemplate = template,
+                            unitPrice = price,
+                            reminderDayOfMonth = day,
+                            isReminderEnabled = reminderEnabled
+                        )
+                        onSave(updated)
+                    }
                 },
+                enabled = !hasError,
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Salvează")

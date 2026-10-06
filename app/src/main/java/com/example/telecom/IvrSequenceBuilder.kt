@@ -1,17 +1,10 @@
 package com.example.telecom
 
 import com.example.data.model.UtilityConfig
-import com.example.data.model.UtilityType
-
-data class IvrStep(
-    val stepNumber: Int,
-    val title: String,
-    val dtmfSequence: String,
-    val pauseSeconds: Int,
-    val explanation: String
-)
 
 object IvrSequenceBuilder {
+
+    private val TEMPLATE_CHARS = Regex("[0-9,#*+X]+")
 
     /**
      * Replaces XXXX with the meter index in the template.
@@ -34,6 +27,15 @@ object IvrSequenceBuilder {
     }
 
     /**
+     * A usable template has exactly one XXXX placeholder and only characters a phone can dial
+     * (digits, comma pause, # and *, +).
+     */
+    fun isValidTemplate(template: String): Boolean {
+        val trimmed = template.trim()
+        return trimmed.matches(TEMPLATE_CHARS) && trimmed.split("XXXX").size == 2
+    }
+
+    /**
      * Builds a test dial string that stops right before entering the meter index.
      * This allows the user to test the call and verify that the IVR robot reaches
      * the "introduceti indexul" prompt without actually submitting an index.
@@ -45,113 +47,6 @@ object IvrSequenceBuilder {
         } else {
             template
         }
-    }
-
-    /**
-     * Breaks down the sequence into human-readable steps for the user UI.
-     */
-    fun explainSequence(type: UtilityType, rawSequence: String, indexInput: String): List<IvrStep> {
-        val steps = mutableListOf<IvrStep>()
-        var stepNum = 1
-
-        val parts = rawSequence.split(",")
-        var accumulatedPauses = 0
-
-        if (type == UtilityType.ELECTRICITY) {
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Inițiere apel TelVerde Curent",
-                    dtmfSequence = "0800070701",
-                    pauseSeconds = 2,
-                    explanation = "Apelează automat numărul gratuit de relații clienți / autocitire."
-                )
-            )
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Selectare meniu Transmitere Index",
-                    dtmfSequence = "Tasta 1",
-                    pauseSeconds = 4,
-                    explanation = "Trimite tasta 1 pentru secțiunea de transmitere index contor."
-                )
-            )
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Introducere Cod Client / NLC",
-                    dtmfSequence = "Cod client urmat de #",
-                    pauseSeconds = 6,
-                    explanation = "Transmite automat codul de client înregistrat și confirmă cu tasta #."
-                )
-            )
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Confirmare date client",
-                    dtmfSequence = "Tasta 1",
-                    pauseSeconds = 10,
-                    explanation = "Confirmă identificatorul locului de consum și așteaptă solicitarea indexului."
-                )
-            )
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Transmitere Index Contor",
-                    dtmfSequence = "${indexInput.ifBlank { "XXXX" }}#",
-                    pauseSeconds = 4,
-                    explanation = "Introduce cifrele indexului citit de pe contor urmate de diez (#)."
-                )
-            )
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Confirmare finală și încheiere",
-                    dtmfSequence = "Tasta 1",
-                    pauseSeconds = 2,
-                    explanation = "Apasă tasta 1 pentru salvarea definitivă a indexului în baza distribuitorului."
-                )
-            )
-        } else {
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Inițiere apel TelVerde Gaz",
-                    dtmfSequence = "0800800200",
-                    pauseSeconds = 2,
-                    explanation = "Apelează numărul gratuit TelVerde furnizor/distribuitor gaze naturale."
-                )
-            )
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Transmitere Cod Client / NLC",
-                    dtmfSequence = "Cod client urmat de #",
-                    pauseSeconds = 6,
-                    explanation = "Robotul preia codul clientului și identifică automat contractul."
-                )
-            )
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Transmitere Index Contor Gaz",
-                    dtmfSequence = "${indexInput.ifBlank { "XXXX" }}#",
-                    pauseSeconds = 4,
-                    explanation = "Transmite valoarea indexului în m³ urmată de tasta diez (#)."
-                )
-            )
-            steps.add(
-                IvrStep(
-                    stepNumber = stepNum++,
-                    title = "Confirmare finală salvare",
-                    dtmfSequence = "Tasta 1",
-                    pauseSeconds = 2,
-                    explanation = "Confirmă că indexul transmis este corect și înregistrează autocitirea."
-                )
-            )
-        }
-
-        return steps
     }
 
     /**

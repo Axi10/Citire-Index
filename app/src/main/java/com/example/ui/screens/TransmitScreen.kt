@@ -3,12 +3,9 @@ package com.example.ui.screens
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,8 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -44,7 +41,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,10 +51,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,6 +83,7 @@ fun TransmitScreen(
     activeUtility: UtilityType,
     config: UtilityConfig?,
     latestReading: MeterReading?,
+    lastTransmittedAt: Long?,
     indexInput: String,
     callEvaluation: CallVerificationResult?,
     onUtilitySelected: (UtilityType) -> Unit,
@@ -92,26 +92,34 @@ fun TransmitScreen(
     onSaveOnly: () -> Unit,
     onUndoLastReading: () -> Unit,
     onDismissCallEvaluation: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val focusManager: FocusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
 
     var showScannerDialog by remember { mutableStateOf(false) }
     var showConfirmationDialog by remember { mutableStateOf(false) }
 
-    // Permission launcher for CALL_PHONE
+    // Phone permission for the automatic call; the call log permission is asked at the same time
+    // so the app can later check how long the call lasted (the user may refuse it).
     val callPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        onTransmitAndCall(isGranted)
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        onTransmitAndCall(result[Manifest.permission.CALL_PHONE] == true)
     }
 
     val accentColor = if (activeUtility == UtilityType.GAS) GasCyan else ElectricityAmber
-    val submissionStatus = remember(activeUtility, config, latestReading) {
+
+    // Only a reading whose call really started counts as "sent"; one that was just saved does not
+    val submissionStatus = remember(activeUtility, config, lastTransmittedAt) {
         val targetDay = config?.reminderDayOfMonth ?: activeUtility.defaultDay
-        ReminderScheduler.getSubmissionStatus(targetDay, latestReading?.timestamp)
+        ReminderScheduler.getSubmissionStatus(targetDay, lastTransmittedAt)
     }
+
+    // Config is null only while it is loading; an empty client code means the user must set it up
+    val needsSetup = config != null && config.clientCode.isBlank()
 
     val currentIndexVal = indexInput.toDoubleOrNull() ?: 0.0
     val prevIndexVal = latestReading?.indexValue
@@ -125,6 +133,10 @@ fun TransmitScreen(
     val isNegativeIndex = prevIndexVal != null && currentIndexVal > 0 && currentIndexVal < prevIndexVal
     val isSuspiciouslyHigh = (activeUtility == UtilityType.GAS && consumption > 350) ||
             (activeUtility == UtilityType.ELECTRICITY && consumption > 600)
+
+    val lastIndexDate = remember(latestReading?.timestamp) {
+        latestReading?.let { SimpleDateFormat("dd MMM yyyy", Locale("ro", "RO")).format(Date(it.timestamp)) }
+    }
 
     // Meter Scanner Dialog
     if (showScannerDialog) {
@@ -153,9 +165,12 @@ fun TransmitScreen(
                 if (CallHelper.hasCallPermission(context)) {
                     onTransmitAndCall(true)
                 } else {
-                    callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                    callPermissionLauncher.launch(
+                        arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_CALL_LOG)
+                    )
                 }
-            }
+            },
+            alreadySubmitted = submissionStatus.isSubmittedForCurrentCycle
         )
     }
 
@@ -172,7 +187,47 @@ fun TransmitScreen(
             onSelect = onUtilitySelected
         )
 
-        // 2. Call Verification Banner (If call was just evaluated from call log)
+        // 2. Setup card: without the client code the robot cannot identify the customer
+        if (needsSetup) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFFFFF3E0),
+                border = BorderStroke(1.dp, Color(0xFFFFB74D))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFE65100),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Configurare necesară",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = Color(0xFFE65100)
+                        )
+                    }
+                    Text(
+                        text = "Introdu codul de client pentru ${activeUtility.title} (se găsește pe factură). Fără el, robotul furnizorului nu te poate identifica, deci transmiterea este oprită.",
+                        fontSize = 12.sp,
+                        color = Color(0xFF4E342E)
+                    )
+                    Button(
+                        onClick = onOpenSettings,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
+                    ) {
+                        Text("Deschide Setările", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // 3. Call Verification Banner (If call was just evaluated from call log)
         if (callEvaluation != null) {
             CallOutcomeBanner(
                 evaluation = callEvaluation,
@@ -181,7 +236,7 @@ fun TransmitScreen(
             )
         }
 
-        // 3. Compact Status Bar: Period & Previous Index
+        // 4. Compact Status Bar: Period & Previous Index
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -194,22 +249,32 @@ fun TransmitScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Ultimul index salvat",
                         fontSize = 11.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = if (latestReading != null) "${latestReading.indexValue.toInt()} ${activeUtility.unit}" else "Nicio citire",
+                        text = if (latestReading != null) "${latestReading.indexValue.toLong()} ${activeUtility.unit}" else "Nicio citire",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    if (lastIndexDate != null) {
+                        Text(
+                            text = lastIndexDate,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 val badgeColor = if (submissionStatus.isSubmittedForCurrentCycle) CostGreen else accentColor
                 Surface(
+                    modifier = Modifier.weight(1.4f),
                     shape = RoundedCornerShape(8.dp),
                     color = badgeColor.copy(alpha = 0.15f)
                 ) {
@@ -224,7 +289,7 @@ fun TransmitScreen(
             }
         }
 
-        // 4. Main Index Input Card with OCR Camera Scanner
+        // 5. Main Index Input Card with OCR Camera Scanner
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
@@ -270,7 +335,8 @@ fun TransmitScreen(
                     label = { Text("Index (${activeUtility.unit})") },
                     placeholder = { Text("0") },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                     isError = isNegativeIndex,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -319,7 +385,7 @@ fun TransmitScreen(
                         MetricCard(
                             title = "Consum",
                             value = "+${String.format(Locale.US, "%.1f", consumption)} ${activeUtility.unit}",
-                            subtitle = if (prevIndexVal != null) "Față de ${prevIndexVal.toInt()}" else "Prima citire",
+                            subtitle = if (prevIndexVal != null) "Față de ${prevIndexVal.toLong()}" else "Prima citire",
                             icon = Icons.Default.Speed,
                             accentColor = accentColor,
                             modifier = Modifier.weight(1f)
@@ -338,7 +404,7 @@ fun TransmitScreen(
             }
         }
 
-        // 5. Clean, Concrete Actions
+        // 6. Clean, Concrete Actions
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -346,10 +412,11 @@ fun TransmitScreen(
             Button(
                 onClick = {
                     if (currentIndexVal > 0) {
+                        focusManager.clearFocus()
                         showConfirmationDialog = true
                     }
                 },
-                enabled = currentIndexVal > 0 && !isNegativeIndex,
+                enabled = currentIndexVal > 0 && !isNegativeIndex && !needsSetup,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp)
@@ -371,7 +438,7 @@ fun TransmitScreen(
 
             OutlinedButton(
                 onClick = onSaveOnly,
-                enabled = currentIndexVal > 0,
+                enabled = currentIndexVal > 0 && !isNegativeIndex,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(46.dp)
@@ -397,6 +464,10 @@ private fun CallOutcomeBanner(
     val isSuccess = evaluation.status == CallStatusEvaluation.CONFIRMED_SUCCESS
     val isCancelled = evaluation.status == CallStatusEvaluation.CANCELLED_OR_MISSED
 
+    // The banner has a fixed light background, so its text must be dark in every theme
+    // (it used the theme text colour, which is almost white in dark mode)
+    val bodyTextColor = Color(0xFF1F2937)
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -418,7 +489,7 @@ private fun CallOutcomeBanner(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isSuccess) "Apel Confirmat" else "Verificare Apel",
+                        text = if (isSuccess) "Apel finalizat" else "Verificare Apel",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.5.sp,
                         color = if (isSuccess) Color(0xFF2E7D32) else Color(0xFFE65100)
@@ -426,7 +497,12 @@ private fun CallOutcomeBanner(
                 }
 
                 IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Închide", modifier = Modifier.size(16.dp))
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Închide",
+                        tint = bodyTextColor,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
 
@@ -434,7 +510,7 @@ private fun CallOutcomeBanner(
             Text(
                 text = evaluation.message,
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface
+                color = bodyTextColor
             )
 
             if (isCancelled || evaluation.status == CallStatusEvaluation.TOO_SHORT) {
@@ -495,7 +571,7 @@ private fun UtilitySelectorBar(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "GAZ (ziua 16)",
+                        text = "GAZ",
                         fontWeight = if (isGas) FontWeight.Bold else FontWeight.Medium,
                         fontSize = 13.5.sp,
                         color = if (isGas) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
@@ -525,7 +601,7 @@ private fun UtilitySelectorBar(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "CURENT (ziua 24)",
+                        text = "CURENT",
                         fontWeight = if (isElec) FontWeight.Bold else FontWeight.Medium,
                         fontSize = 13.5.sp,
                         color = if (isElec) Color.White else MaterialTheme.colorScheme.onSurfaceVariant

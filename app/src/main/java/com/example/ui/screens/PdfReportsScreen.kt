@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,18 +22,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -60,6 +63,7 @@ import com.example.ui.theme.ElectricityAmber
 import com.example.ui.theme.GasCyan
 import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -67,11 +71,20 @@ import java.util.Locale
 fun PdfReportsScreen(
     readings: List<MeterReading>,
     lastGeneratedFile: File?,
-    onExportPdf: (periodName: String) -> Unit,
+    onExportPdf: (periodName: String, sinceMs: Long?) -> Unit,
+    onExportCsv: () -> Unit,
+    onImportCsv: (Uri) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+
+    // System file picker for restoring a CSV made by "Export"
+    val csvPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) onImportCsv(uri)
+    }
 
     val currentMonthFormat = SimpleDateFormat("MMMM yyyy", Locale("ro", "RO"))
     val currentMonthLabel = remember { currentMonthFormat.format(Date()).replaceFirstChar { it.uppercase() } }
@@ -84,19 +97,30 @@ fun PdfReportsScreen(
         else -> "Istoric Complet"
     }
 
-    val periodReadings = remember(readings, selectedPeriodType) {
-        val now = System.currentTimeMillis()
+    // Start of the selected period; null means the whole history. The same value is used for
+    // the preview below and for the PDF, so the file always matches what is shown here.
+    val periodStartMs: Long? = remember(selectedPeriodType) {
         when (selectedPeriodType) {
-            0 -> {
-                val oneMonthAgo = now - 31L * 24 * 3600 * 1000
-                readings.filter { it.timestamp >= oneMonthAgo }
-            }
-            1 -> {
-                val threeMonthsAgo = now - 92L * 24 * 3600 * 1000
-                readings.filter { it.timestamp >= threeMonthsAgo }
-            }
-            else -> readings
+            0 -> Calendar.getInstance().apply {
+                set(Calendar.DAY_OF_MONTH, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            1 -> Calendar.getInstance().apply {
+                add(Calendar.MONTH, -3)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            else -> null
         }
+    }
+
+    val periodReadings = remember(readings, periodStartMs) {
+        if (periodStartMs == null) readings else readings.filter { it.timestamp >= periodStartMs }
     }
 
     val totalGas = periodReadings.filter { it.utilityType == UtilityType.GAS }.sumOf { it.consumption }
@@ -147,7 +171,7 @@ fun PdfReportsScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Document A4 imprimabil cu indecșii transmiși, consumul și costul estimativ.",
+                        text = "Document A4 imprimabil cu indeții transmiși, consumul și costul estimativ.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -392,7 +416,7 @@ fun PdfReportsScreen(
 
         // 5. Generate Button
         Button(
-            onClick = { onExportPdf(periodLabel) },
+            onClick = { onExportPdf(periodLabel, periodStartMs) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp)
@@ -426,6 +450,53 @@ fun PdfReportsScreen(
                 Text("Re-trimite ultimul raport (${lastGeneratedFile.name.take(22)}...)", fontSize = 12.5.sp)
             }
         }
+
+        // 7. Backup and restore of the whole history; the CSV also opens in Excel
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            OutlinedButton(
+                onClick = onExportCsv,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("export_csv_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(imageVector = Icons.Default.TableChart, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Export CSV", fontSize = 12.5.sp)
+            }
+
+            OutlinedButton(
+                onClick = {
+                    csvPicker.launch(
+                        arrayOf(
+                            "text/csv",
+                            "text/comma-separated-values",
+                            "application/csv",
+                            "application/vnd.ms-excel",
+                            "text/plain"
+                        )
+                    )
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("import_csv_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(imageVector = Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Import CSV", fontSize = 12.5.sp)
+            }
+        }
+        Text(
+            text = "Exportul salvează tot istoricul. Importul îl pune la loc, fără să dubleze citirile existente.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         Spacer(modifier = Modifier.height(10.dp))
     }

@@ -1,24 +1,41 @@
 # Index Utilități - Gaz & Curent
 
-Aplicație Android pentru transmiterea automată prin IVR (robot telefonic) a indexului de gaze și curent electric, cu notificări lunare, grafice de consum, estimare a costurilor și rapoarte PDF.
+Aplicație Android pentru transmiterea automată, prin robotul telefonic (IVR) al furnizorului, a indexului de gaze și curent electric. Are notificări lunare, grafice de consum, estimare de cost, rapoarte PDF și export CSV.
 
-## 📱 Cum descarci și instalezi APK-ul pe telefon (Fără compilare în Git)
+## Cum funcționează
 
-APK-ul este **deja generat și gata de instalare**, pus direct în depozit:
+Introduci indexul de pe contor (sau îl scanezi cu camera), iar aplicația apelează numărul TelVerde al furnizorului și trimite automat codul de client, indexul și confirmările (tonuri DTMF). Pauzele dintre taste sunt virgulele din șablonul de apel, de exemplu `0800800200,12345#,,,XXXX#,,1`, unde `XXXX` este înlocuit cu indexul. Șablonul se poate vedea și modifica din **Setări → Modifică → Setări avansate**.
 
-### Metoda 1: Descărcare directă din pagina principală (Rădăcină)
-1. Pe pagina principală a depozitului GitHub, apasă direct pe fișierul [`index-utilitati.apk`](./index-utilitati.apk).
-2. Apasă pe butonul **Download** (sau **View raw**).
-3. Fișierul se va descărca direct pe telefonul tău.
-4. Deschide fișierul `.apk` pe Android și apasă **Instalează** (permite instalarea din surse necunoscute / browser dacă ți se cere).
+⚠️ Aplicația nu primește confirmare de la robot. După apel afișează doar durata convorbirii (din istoricul apelurilor): verifică totuși că indexul a fost preluat.
 
----
+## Prima pornire
 
-### Metoda 2: Descărcare din folderul `release/`
-1. Deschide folderul [`release/`](./release).
-2. Apasă pe fișierul [`index-utilitati.apk`](./release/index-utilitati.apk).
-3. Apasă pe **Download**.
+1. Deschide **Setări** și apasă **Modifică** la Gaz și la Curent.
+2. Completează **Codul de client** (se găsește pe factură). Codul nu este inclus în aplicație, ca să nu fie public în depozit; fără el transmiterea este oprită.
+3. Verifică prețul pe unitate și ziua notificării.
+4. Folosește **Teste rapide** din Setări: apelul de test sună robotul și se oprește când cere indexul, fără să transmită nimic.
 
----
+## Istoric și copie de siguranță
 
-*Notă:* Nu este nevoie să aștepți ca GitHub Actions să ruleze sau să compileze. APK-ul este precompilat și inclus direct în fișierele proiectului.
+- **Raport PDF**: pe perioada aleasă (luna curentă, ultimele 3 luni sau tot istoricul), pe mai multe pagini.
+- **Export CSV** și **Import CSV**: tot istoricul, ca fișier care se deschide în Excel. Fă exportul înainte de a dezinstala aplicația, pentru că dezinstalarea șterge datele; importul le pune la loc fără să dubleze citirile existente.
+
+## Cum obții APK-ul
+
+### Metoda 1: Ultima versiune, din GitHub Actions
+1. Deschide fila **Actions** și alege ultima rulare `Build Android APK` cu bifă verde.
+2. La **Artifacts** descarcă `index-utilitati-apk` (arhivă ZIP cu APK-ul în ea).
+
+Rularea pornește la fiecare push pe `main` sau manual (**Run workflow**). Fiecare build are numărul versiunii egal cu numărul rulării (`1.1.<număr>`), deci este mai nou decât cel anterior.
+
+### Metoda 2: APK-ul precompilat din depozit
+- [`public/index-utilitati.apk`](./public/index-utilitati.apk)
+- [`release/index-utilitati.apk`](./release/index-utilitati.apk)
+
+Pot fi mai vechi decât codul. Permite instalarea din surse necunoscute dacă ți se cere.
+
+## Actualizarea peste versiunea instalată
+
+Android instalează un APK peste aplicația existentă doar dacă are **aceeași semnătură**. Ca APK-urile din Actions să aibă mereu aceeași semnătură, workflow-ul citește o cheie din secretul `DEBUG_KEYSTORE_BASE64` al depozitului (Settings → Secrets and variables → Actions). Fără secret, fiecare build își generează o cheie temporară și nu se mai poate instala peste versiunea veche (trebuie dezinstalată mai întâi, ceea ce șterge datele: fă mai întâi exportul CSV).
+
+Cheia nu se pune niciodată în depozit: este un secret, iar depozitul este public.

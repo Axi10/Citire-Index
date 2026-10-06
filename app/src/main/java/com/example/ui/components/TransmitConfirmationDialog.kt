@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,6 +33,10 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.UtilityType
 import java.util.Locale
 
+// A fixed locale: Locale.getDefault() read inside a composable does not trigger a recomposition
+// when the system language changes
+private val ROMANIAN: Locale = Locale.forLanguageTag("ro-RO")
+
 @Composable
 fun TransmitConfirmationDialog(
     type: UtilityType,
@@ -44,7 +47,8 @@ fun TransmitConfirmationDialog(
     isSuspiciouslyHigh: Boolean,
     isNegative: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: () -> Unit,
+    alreadySubmitted: Boolean = false
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -77,7 +81,7 @@ fun TransmitConfirmationDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Atenție: Noul index este mai mic decât cel anterior (${previousIndex?.toInt()} ${type.unit}). Te rugăm să verifici contorul!",
+                            text = "Atenție: Noul index este mai mic decât cel anterior (${previousIndex?.toLong()} ${type.unit}). Te rugăm să verifici contorul!",
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
@@ -101,6 +105,24 @@ fun TransmitConfirmationDialog(
                     }
                 }
 
+                // The index for this cycle was already sent: a second call is usually a mistake
+                if (alreadySubmitted) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFE3F2FD),
+                        border = BorderStroke(1.dp, Color(0xFF90CAF9)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Ai transmis deja indexul pentru această perioadă. Transmiți din nou doar dacă vrei să corectezi o valoare greșită.",
+                            color = Color(0xFF0D47A1),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+
                 // Summary Card
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -117,7 +139,7 @@ fun TransmitConfirmationDialog(
                         ) {
                             Text("Index de trimis:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                text = "${indexValue.toInt()} ${type.unit}",
+                                text = "${indexValue.toLong()} ${type.unit}",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
@@ -131,7 +153,7 @@ fun TransmitConfirmationDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text("Index anterior:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("${previousIndex.toInt()} ${type.unit}", fontSize = 12.sp)
+                                Text("${previousIndex.toLong()} ${type.unit}", fontSize = 12.sp)
                             }
                         }
 
@@ -141,7 +163,7 @@ fun TransmitConfirmationDialog(
                         ) {
                             Text("Consum calculat:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                text = "+${String.format(Locale.getDefault(), "%.1f", consumption)} ${type.unit}",
+                                text = "+${String.format(ROMANIAN, "%.1f", consumption)} ${type.unit}",
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp
                             )
@@ -153,7 +175,7 @@ fun TransmitConfirmationDialog(
                         ) {
                             Text("Cost estimat:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                text = "${String.format(Locale.getDefault(), "%.2f", estimatedCost)} LEI",
+                                text = "${String.format(ROMANIAN, "%.2f", estimatedCost)} LEI",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.primary
@@ -173,11 +195,16 @@ fun TransmitConfirmationDialog(
             Button(
                 onClick = onConfirm,
                 enabled = !isNegative,
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(8.dp),
+                colors = if (alreadySubmitted) {
+                    ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
+                } else {
+                    ButtonDefaults.buttonColors()
+                }
             ) {
                 Icon(imageVector = Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Confirmă & Sună")
+                Text(if (alreadySubmitted) "Transmite din nou" else "Confirmă & Sună")
             }
         },
         dismissButton = {

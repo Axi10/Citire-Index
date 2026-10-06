@@ -19,6 +19,22 @@ import java.util.Locale
 
 object PdfReportGenerator {
 
+    private const val PAGE_WIDTH = 595
+    private const val PAGE_HEIGHT = 842
+    private const val ROW_HEIGHT = 22f
+
+    // Table rows must end above this line; the footer sits below it
+    private const val CONTENT_BOTTOM = 790f
+    private const val CONTINUATION_TOP = 40f
+
+    private const val COL_DATE = 30f
+    private const val COL_TYPE = 120f
+    private const val COL_INDEX = 200f
+    private const val COL_DELTA = 275f
+    private const val COL_PRICE = 345f
+    private const val COL_COST = 420f
+    private const val COL_STATUS = 490f
+
     fun generateMonthlyReport(
         context: Context,
         periodName: String,
@@ -26,46 +42,100 @@ object PdfReportGenerator {
         gasConfig: UtilityConfig?,
         electricityConfig: UtilityConfig?
     ): File? {
+        val pdfDocument = PdfDocument()
         return try {
-            val pdfDocument = PdfDocument()
-            val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // Standard A4 (points)
-            val page = pdfDocument.startPage(pageInfo)
-            val canvas: Canvas = page.canvas
+            val sorted = readings.sortedByDescending { it.timestamp }
 
-            drawReportContent(canvas, periodName, readings, gasConfig, electricityConfig)
+            var pageNumber = 1
+            var page = pdfDocument.startPage(newPageInfo(pageNumber))
+            var canvas: Canvas = page.canvas
 
+            var y = drawFirstPageHeader(canvas, periodName, sorted)
+            y = drawTableHeader(canvas, y)
+
+            if (sorted.isEmpty()) {
+                val paint = Paint().apply { isAntiAlias = true }
+                paint.color = Color.rgb(148, 163, 184)
+                paint.textSize = 11f
+                canvas.drawText("Nu există înregistrări pentru perioada selectată.", 40f, y + 30f, paint)
+                y += 60f
+            }
+
+            for ((index, item) in sorted.withIndex()) {
+                if (y + ROW_HEIGHT > CONTENT_BOTTOM) {
+                    drawFooter(canvas, pageNumber)
+                    pdfDocument.finishPage(page)
+                    pageNumber++
+                    page = pdfDocument.startPage(newPageInfo(pageNumber))
+                    canvas = page.canvas
+                    y = drawTableHeader(canvas, CONTINUATION_TOP)
+                }
+                drawRow(canvas, item, y, index)
+                y += ROW_HEIGHT
+            }
+
+            // Table bottom border
+            val linePaint = Paint().apply {
+                isAntiAlias = true
+                color = Color.rgb(203, 213, 225)
+                strokeWidth = 1f
+            }
+            canvas.drawLine(30f, y, 565f, y, linePaint)
+
+            // Contracts box needs 70 points; start a new page if it does not fit
+            var infoTop = y + 30f
+            if (infoTop + 70f > CONTENT_BOTTOM) {
+                drawFooter(canvas, pageNumber)
+                pdfDocument.finishPage(page)
+                pageNumber++
+                page = pdfDocument.startPage(newPageInfo(pageNumber))
+                canvas = page.canvas
+                infoTop = CONTINUATION_TOP
+            }
+            drawContractInfo(canvas, infoTop, gasConfig, electricityConfig)
+
+            drawFooter(canvas, pageNumber)
             pdfDocument.finishPage(page)
 
-            // Save file
+            // Save file; reports from earlier runs are not needed any more
             val outputDir = File(context.cacheDir, "reports").apply { mkdirs() }
-            val sanitizedPeriod = periodName.replace(" ", "_").lowercase(Locale.ROOT)
+            outputDir.listFiles()?.forEach { if (it.name.endsWith(".pdf")) it.delete() }
+
+            val sanitizedPeriod = periodName.replace(Regex("[^A-Za-z0-9]+"), "_").trim('_').lowercase(Locale.ROOT)
             val file = File(outputDir, "Raport_Consum_${sanitizedPeriod}_${System.currentTimeMillis()}.pdf")
-            val outputStream = FileOutputStream(file)
-            pdfDocument.writeTo(outputStream)
-            outputStream.flush()
-            outputStream.close()
-            pdfDocument.close()
+            FileOutputStream(file).use { pdfDocument.writeTo(it) }
 
             file
         } catch (e: Exception) {
             e.printStackTrace()
             null
+        } finally {
+            // close() throws if a page was left unfinished by an earlier failure
+            try {
+                pdfDocument.close()
+            } catch (_: Exception) {
+            }
         }
     }
 
-    private fun drawReportContent(
+    private fun newPageInfo(pageNumber: Int): PdfDocument.PageInfo =
+        PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create() // A4 in points
+
+    /**
+     * Draws the dark header, the three summary cards and the section title.
+     * Returns the Y position where the table header starts.
+     */
+    private fun drawFirstPageHeader(
         canvas: Canvas,
         periodName: String,
-        readings: List<MeterReading>,
-        gasConfig: UtilityConfig?,
-        electricityConfig: UtilityConfig?
-    ) {
+        readings: List<MeterReading>
+    ): Float {
         val paint = Paint().apply { isAntiAlias = true }
         val dateFormat = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
 
         // 1. Header background
         paint.color = Color.rgb(15, 23, 42) // Dark Slate #0F172A
-        canvas.drawRect(0f, 0f, 595f, 95f, paint)
+        canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), 95f, paint)
 
         // Header Title
         paint.color = Color.WHITE
@@ -95,33 +165,30 @@ object PdfReportGenerator {
 
         var currentY = 115f
 
-        // Card 1: Gaz
         drawSummaryCard(
             canvas = canvas,
             rect = RectF(30f, currentY, 205f, currentY + 80f),
-            title = "🔥 Gaze Naturale",
+            title = "Gaze Naturale",
             accentColor = Color.rgb(2, 132, 199), // Blue
             primaryMetric = String.format(Locale.US, "%.1f m³", totalGasConsumption),
             secondaryMetric = String.format(Locale.US, "Cost: %.2f LEI", totalGasCost),
             latestIndex = String.format(Locale.US, "Ultimul index: %.0f", latestGasIndex)
         )
 
-        // Card 2: Curent Electric
         drawSummaryCard(
             canvas = canvas,
             rect = RectF(215f, currentY, 390f, currentY + 80f),
-            title = "⚡ Curent Electric",
+            title = "Curent Electric",
             accentColor = Color.rgb(245, 158, 11), // Amber
             primaryMetric = String.format(Locale.US, "%.1f kWh", totalElecConsumption),
             secondaryMetric = String.format(Locale.US, "Cost: %.2f LEI", totalElecCost),
             latestIndex = String.format(Locale.US, "Ultimul index: %.0f", latestElecIndex)
         )
 
-        // Card 3: Total Estimat
         drawSummaryCard(
             canvas = canvas,
             rect = RectF(400f, currentY, 565f, currentY + 80f),
-            title = "💰 Total Estimativ",
+            title = "Total Estimativ",
             accentColor = Color.rgb(16, 185, 129), // Emerald
             primaryMetric = String.format(Locale.US, "%.2f LEI", totalGeneralCost),
             secondaryMetric = "Total de plată estimat",
@@ -130,117 +197,101 @@ object PdfReportGenerator {
 
         currentY += 105f
 
-        // 3. Section Title: Istoric & Detalii
+        // 3. Section Title
         paint.color = Color.rgb(30, 41, 59)
         paint.textSize = 14f
         paint.isFakeBoldText = true
         canvas.drawText("DETALII TRANSMITERE ȘI CONSUM", 30f, currentY, paint)
 
-        currentY += 15f
+        return currentY + 15f
+    }
 
-        // 4. Table Header
-        val colDate = 30f
-        val colType = 120f
-        val colIndex = 200f
-        val colDelta = 275f
-        val colPrice = 345f
-        val colCost = 420f
-        val colStatus = 490f
+    /** Draws the table header at [y] and returns the Y of the first row. */
+    private fun drawTableHeader(canvas: Canvas, y: Float): Float {
+        val paint = Paint().apply { isAntiAlias = true }
 
         paint.color = Color.rgb(241, 245, 249) // Light grey table header
-        canvas.drawRect(30f, currentY, 565f, currentY + 24f, paint)
+        canvas.drawRect(30f, y, 565f, y + 24f, paint)
 
         paint.color = Color.rgb(71, 85, 105)
         paint.textSize = 9.5f
         paint.isFakeBoldText = true
-        canvas.drawText("DATĂ", colDate + 6f, currentY + 16f, paint)
-        canvas.drawText("UTILITATE", colType, currentY + 16f, paint)
-        canvas.drawText("INDEX", colIndex, currentY + 16f, paint)
-        canvas.drawText("CONSUM", colDelta, currentY + 16f, paint)
-        canvas.drawText("PREȚ/UNIT", colPrice, currentY + 16f, paint)
-        canvas.drawText("COST (LEI)", colCost, currentY + 16f, paint)
-        canvas.drawText("APEL IVR", colStatus, currentY + 16f, paint)
+        canvas.drawText("DATĂ", COL_DATE + 6f, y + 16f, paint)
+        canvas.drawText("UTILITATE", COL_TYPE, y + 16f, paint)
+        canvas.drawText("INDEX", COL_INDEX, y + 16f, paint)
+        canvas.drawText("CONSUM", COL_DELTA, y + 16f, paint)
+        canvas.drawText("PREȚ/UNIT", COL_PRICE, y + 16f, paint)
+        canvas.drawText("COST (LEI)", COL_COST, y + 16f, paint)
+        canvas.drawText("APEL IVR", COL_STATUS, y + 16f, paint)
 
-        currentY += 24f
+        return y + 24f
+    }
 
-        // 5. Table Rows
-        val simpleDateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-        paint.isFakeBoldText = false
+    private fun drawRow(canvas: Canvas, item: MeterReading, y: Float, index: Int) {
+        val paint = Paint().apply { isAntiAlias = true }
+        val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
 
-        if (readings.isEmpty()) {
-            paint.color = Color.rgb(148, 163, 184)
-            paint.textSize = 11f
-            canvas.drawText("Nu există înregistrări pentru perioada selectată.", 40f, currentY + 30f, paint)
-            currentY += 60f
-        } else {
-            readings.forEachIndexed { index, item ->
-                if (currentY > 750f) return@forEachIndexed // avoid overflowing A4 page
-
-                // alternating background
-                if (index % 2 == 1) {
-                    paint.color = Color.rgb(248, 250, 252)
-                    canvas.drawRect(30f, currentY, 565f, currentY + 22f, paint)
-                }
-
-                paint.color = Color.rgb(30, 41, 59)
-                paint.textSize = 9.5f
-
-                // Date
-                canvas.drawText(simpleDateFormat.format(Date(item.timestamp)), colDate + 6f, currentY + 15f, paint)
-
-                // Type
-                val typeLabel = if (item.utilityType == UtilityType.GAS) "Gaz (m³)" else "Curent (kWh)"
-                canvas.drawText(typeLabel, colType, currentY + 15f, paint)
-
-                // Index
-                canvas.drawText(String.format(Locale.US, "%.0f", item.indexValue), colIndex, currentY + 15f, paint)
-
-                // Consumption Delta
-                val deltaText = if (item.consumption > 0) "+${String.format(Locale.US, "%.1f", item.consumption)}" else "-"
-                canvas.drawText(deltaText, colDelta, currentY + 15f, paint)
-
-                // Price
-                canvas.drawText(String.format(Locale.US, "%.2f", item.unitPrice), colPrice, currentY + 15f, paint)
-
-                // Cost
-                paint.isFakeBoldText = true
-                canvas.drawText(String.format(Locale.US, "%.2f", item.estimatedCost), colCost, currentY + 15f, paint)
-                paint.isFakeBoldText = false
-
-                // Status
-                val statusText = if (item.isCallExecuted) "Efectuat" else "Salvat"
-                paint.color = if (item.isCallExecuted) Color.rgb(22, 163, 74) else Color.rgb(100, 116, 139)
-                canvas.drawText(statusText, colStatus, currentY + 15f, paint)
-
-                currentY += 22f
-            }
+        // alternating background
+        if (index % 2 == 1) {
+            paint.color = Color.rgb(248, 250, 252)
+            canvas.drawRect(30f, y, 565f, y + ROW_HEIGHT, paint)
         }
 
-        // Table Bottom Border
-        paint.color = Color.rgb(203, 213, 225)
-        paint.strokeWidth = 1f
-        canvas.drawLine(30f, currentY, 565f, currentY, paint)
+        paint.color = Color.rgb(30, 41, 59)
+        paint.textSize = 9.5f
 
-        // 6. IVR Configurations footnote box
-        currentY += 30f
+        canvas.drawText(dateFormat.format(Date(item.timestamp)), COL_DATE + 6f, y + 15f, paint)
+
+        val typeLabel = if (item.utilityType == UtilityType.GAS) "Gaz (m³)" else "Curent (kWh)"
+        canvas.drawText(typeLabel, COL_TYPE, y + 15f, paint)
+
+        canvas.drawText(String.format(Locale.US, "%.0f", item.indexValue), COL_INDEX, y + 15f, paint)
+
+        val deltaText = if (item.consumption > 0) "+${String.format(Locale.US, "%.1f", item.consumption)}" else "-"
+        canvas.drawText(deltaText, COL_DELTA, y + 15f, paint)
+
+        canvas.drawText(String.format(Locale.US, "%.2f", item.unitPrice), COL_PRICE, y + 15f, paint)
+
+        paint.isFakeBoldText = true
+        canvas.drawText(String.format(Locale.US, "%.2f", item.estimatedCost), COL_COST, y + 15f, paint)
+        paint.isFakeBoldText = false
+
+        val statusText = if (item.isCallExecuted) "Efectuat" else "Salvat"
+        paint.color = if (item.isCallExecuted) Color.rgb(22, 163, 74) else Color.rgb(100, 116, 139)
+        canvas.drawText(statusText, COL_STATUS, y + 15f, paint)
+    }
+
+    private fun drawContractInfo(
+        canvas: Canvas,
+        top: Float,
+        gasConfig: UtilityConfig?,
+        electricityConfig: UtilityConfig?
+    ) {
+        val paint = Paint().apply { isAntiAlias = true }
+
         paint.color = Color.rgb(248, 250, 252)
-        val infoRect = RectF(30f, currentY, 565f, currentY + 70f)
-        canvas.drawRoundRect(infoRect, 8f, 8f, paint)
+        canvas.drawRoundRect(RectF(30f, top, 565f, top + 70f), 8f, 8f, paint)
 
         paint.color = Color.rgb(51, 65, 85)
         paint.textSize = 9.5f
         paint.isFakeBoldText = true
-        canvas.drawText("Informații Contracte & Secvențe IVR:", 40f, currentY + 20f, paint)
+        canvas.drawText("Informații Contracte & Secvențe IVR:", 40f, top + 20f, paint)
 
         paint.isFakeBoldText = false
         paint.color = Color.rgb(71, 85, 105)
         paint.textSize = 8.5f
-        val gasInfo = "Gaz: TelVerde ${gasConfig?.phoneNumber ?: UtilityType.GAS.defaultPhone} | Cod Client: ${gasConfig?.clientCode ?: UtilityType.GAS.defaultClientCode} | Termen: 16 ale lunii"
-        val elecInfo = "Curent: TelVerde ${electricityConfig?.phoneNumber ?: UtilityType.ELECTRICITY.defaultPhone} | Cod Client: ${electricityConfig?.clientCode ?: UtilityType.ELECTRICITY.defaultClientCode} | Termen: 24 ale lunii"
-        canvas.drawText(gasInfo, 40f, currentY + 38f, paint)
-        canvas.drawText(elecInfo, 40f, currentY + 54f, paint)
+        val gasDay = gasConfig?.reminderDayOfMonth ?: UtilityType.GAS.defaultDay
+        val elecDay = electricityConfig?.reminderDayOfMonth ?: UtilityType.ELECTRICITY.defaultDay
+        val gasCode = gasConfig?.clientCode?.ifBlank { null } ?: "necompletat"
+        val elecCode = electricityConfig?.clientCode?.ifBlank { null } ?: "necompletat"
+        val gasInfo = "Gaz: TelVerde ${gasConfig?.phoneNumber ?: UtilityType.GAS.defaultPhone} | Cod Client: $gasCode | Termen: $gasDay ale lunii"
+        val elecInfo = "Curent: TelVerde ${electricityConfig?.phoneNumber ?: UtilityType.ELECTRICITY.defaultPhone} | Cod Client: $elecCode | Termen: $elecDay ale lunii"
+        canvas.drawText(gasInfo, 40f, top + 38f, paint)
+        canvas.drawText(elecInfo, 40f, top + 54f, paint)
+    }
 
-        // 7. Footer
+    private fun drawFooter(canvas: Canvas, pageNumber: Int) {
+        val paint = Paint().apply { isAntiAlias = true }
         paint.color = Color.rgb(148, 163, 184)
         paint.textSize = 8f
         canvas.drawText(
@@ -249,6 +300,7 @@ object PdfReportGenerator {
             810f,
             paint
         )
+        canvas.drawText("Pagina $pageNumber", 30f, 824f, paint)
     }
 
     private fun drawSummaryCard(

@@ -2,7 +2,7 @@ package com.example.ui
 
 import android.app.Application
 import android.content.Context
-import android.widget.Toast
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
@@ -11,14 +11,16 @@ import com.example.data.model.UtilityConfig
 import com.example.data.model.UtilityType
 import com.example.data.repository.MeterRepository
 import com.example.notifications.ReminderScheduler
+import com.example.pdf.CsvExporter
+import com.example.pdf.CsvImporter
 import com.example.pdf.PdfReportGenerator
 import com.example.telecom.CallHelper
-import com.example.telecom.CallLogEntry
 import com.example.telecom.CallLogHelper
 import com.example.telecom.CallStatusEvaluation
 import com.example.telecom.CallVerificationResult
 import com.example.telecom.IvrSequenceBuilder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -26,54 +28,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: MeterRepository
-
-    init {
-        val database = AppDatabase.getDatabase(application)
-        repository = MeterRepository(database.meterDao(), database.configDao())
-
-        viewModelScope.launch(Dispatchers.IO) {
-            val gas = repository.getLatestReadingSync(UtilityType.GAS)
-            val elec = repository.getLatestReadingSync(UtilityType.ELECTRICITY)
-            if (gas?.indexValue != 2899.0 || elec?.indexValue != 5397.0) {
-                seedUserProvidedReadings()
-            }
-        }
+    private companion object {
+        // How long we keep waiting for the call to show up in the call log
+        const val PENDING_CALL_TIMEOUT_MS = 10 * 60 * 1000L
+        const val MAX_INDEX_DIGITS = 9
     }
 
-    private suspend fun seedUserProvidedReadings() {
-        repository.deleteAllReadings()
-        val dayMs = 24L * 3600 * 1000
-        val now = System.currentTimeMillis()
-        val fourMonthsAgo = now - 120L * dayMs
-        val threeMonthsAgo = now - 90L * dayMs
-        val twoMonthsAgo = now - 60L * dayMs
-        val oneMonthAgo = now - 30L * dayMs
-        val sevenDaysAgo = now - 7L * dayMs
-
-        // Curent (5174, 5215, 5270, 5350, 5397 | 1.64)
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5174.0, previousIndexValue = null, consumption = 0.0, unitPrice = 1.64, estimatedCost = 0.0, timestamp = fourMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5215.0, previousIndexValue = 5174.0, consumption = 41.0, unitPrice = 1.64, estimatedCost = 41.0 * 1.64, timestamp = threeMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5270.0, previousIndexValue = 5215.0, consumption = 55.0, unitPrice = 1.64, estimatedCost = 55.0 * 1.64, timestamp = twoMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5350.0, previousIndexValue = 5270.0, consumption = 80.0, unitPrice = 1.64, estimatedCost = 80.0 * 1.64, timestamp = oneMonthAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.ELECTRICITY, indexValue = 5397.0, previousIndexValue = 5350.0, consumption = 47.0, unitPrice = 1.64, estimatedCost = 47.0 * 1.64, timestamp = now, isCallExecuted = true, notes = ""))
-
-        // Gaz (2886, 2889, 2892, 2896, 2899 | 3.02)
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2886.0, previousIndexValue = null, consumption = 0.0, unitPrice = 3.02, estimatedCost = 0.0, timestamp = fourMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2889.0, previousIndexValue = 2886.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = threeMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2892.0, previousIndexValue = 2889.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = twoMonthsAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2896.0, previousIndexValue = 2892.0, consumption = 4.0, unitPrice = 3.02, estimatedCost = 4.0 * 3.02, timestamp = oneMonthAgo, isCallExecuted = true, notes = ""))
-        repository.insertReading(MeterReading(utilityType = UtilityType.GAS, indexValue = 2899.0, previousIndexValue = 2896.0, consumption = 3.0, unitPrice = 3.02, estimatedCost = 3.0 * 3.02, timestamp = sevenDaysAgo, isCallExecuted = true, notes = ""))
-
-        repository.saveConfig(UtilityConfig(utilityType = UtilityType.GAS, phoneNumber = UtilityType.GAS.defaultPhone, clientCode = UtilityType.GAS.defaultClientCode, ivrTemplate = UtilityType.GAS.defaultIvrTemplate, unitPrice = 3.02, reminderDayOfMonth = 16))
-        repository.saveConfig(UtilityConfig(utilityType = UtilityType.ELECTRICITY, phoneNumber = UtilityType.ELECTRICITY.defaultPhone, clientCode = UtilityType.ELECTRICITY.defaultClientCode, ivrTemplate = UtilityType.ELECTRICITY.defaultIvrTemplate, unitPrice = 1.64, reminderDayOfMonth = 24))
+    private val repository: MeterRepository = AppDatabase.getDatabase(application).let { database ->
+        MeterRepository(database.meterDao(), database.configDao())
     }
 
     // Active bottom navigation tab (0: Transmit, 1: History & Charts, 2: PDF, 3: Settings)
@@ -96,10 +63,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _generatedPdf = MutableStateFlow<File?>(null)
     val generatedPdf: StateFlow<File?> = _generatedPdf.asStateFlow()
 
-    // Call Log tracking and verification
+    // The reading created by the last transmit, so it can be undone
     private var lastInitiatedReadingId: Long? = null
+    private var lastInsertedType: UtilityType? = null
+
+    // Call verification: set when a call is requested, cleared once the call log was read
     private var callInitiatedTimeMs: Long = 0L
     private var lastInitiatedType: UtilityType? = null
+    private var verifying = false
 
     private val _lastCallEvaluation = MutableStateFlow<CallVerificationResult?>(null)
     val lastCallEvaluation: StateFlow<CallVerificationResult?> = _lastCallEvaluation.asStateFlow()
@@ -138,6 +109,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (type == UtilityType.GAS) gas else elec
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    // When the selected utility was last really transmitted. A reading that was only saved does
+    // not count: it must not make the app say the index was already sent.
+    val currentLastTransmittedAt: StateFlow<Long?> = combine(
+        _activeUtility, allReadings
+    ) { type, readings ->
+        readings.filter { it.utilityType == type && it.isCallExecuted }.maxOfOrNull { it.timestamp }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     fun setTab(index: Int) {
         _selectedTab.value = index
     }
@@ -148,9 +127,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateIndexInput(input: String) {
-        // Allow digits and at most one decimal point
-        val filtered = input.filter { it.isDigit() || it == '.' }
-        _indexInput.value = filtered
+        // Meter indexes are sent to the IVR as whole numbers: digits only
+        _indexInput.value = input.filter { it.isDigit() }.take(MAX_INDEX_DIGITS)
     }
 
     fun clearUserMessage() {
@@ -179,11 +157,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getFullDialString(type: UtilityType, config: UtilityConfig?, indexString: String): String {
         val template = config?.ivrTemplate ?: type.defaultIvrTemplate
         val indexForDial = if (indexString.isBlank()) "XXXX" else {
-            // Usually meters transmit integer digits, or if decimal strip dot
+            // Meters transmit whole numbers; strip any separator just in case
             indexString.replace(".", "")
         }
         return IvrSequenceBuilder.buildDialString(template, indexForDial)
     }
+
+    private fun configFor(type: UtilityType): UtilityConfig? =
+        if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
+
+    private fun clientCodeMissing(type: UtilityType): Boolean =
+        configFor(type)?.clientCode.isNullOrBlank()
 
     /**
      * Transmit and call: Saves reading to database and places call (direct or dialer)
@@ -196,12 +180,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val type = _activeUtility.value
-        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
+        if (clientCodeMissing(type)) {
+            _userMessage.value = "Completăm întâi codul de client la Setări, altfel robotul nu te poate identifica."
+            return
+        }
+
+        val config = configFor(type)
         val prevReading = if (type == UtilityType.GAS) latestGasReading.value else latestElectricityReading.value
 
         val prevVal = prevReading?.indexValue
         if (prevVal != null && indexVal < prevVal) {
-            _userMessage.value = "Atenție: Indexul nou (${indexVal.toInt()}) este mai mic decât indexul anterior (${prevVal.toInt()})!"
+            _userMessage.value = "Atenție: Indexul nou (${indexVal.toLong()}) este mai mic decât indexul anterior (${prevVal.toLong()})!"
             return
         }
 
@@ -211,6 +200,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val dialSequence = getFullDialString(type, config, _indexInput.value)
 
         viewModelScope.launch {
+            // Marked as called only once the call really starts (or the call log confirms it)
             val reading = MeterReading(
                 utilityType = type,
                 indexValue = indexVal,
@@ -220,18 +210,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 estimatedCost = estimatedCost,
                 timestamp = System.currentTimeMillis(),
                 callSequenceUsed = dialSequence,
-                isCallExecuted = true,
+                isCallExecuted = false,
                 notes = ""
             )
 
             val insertedId = repository.insertReading(reading)
             lastInitiatedReadingId = insertedId
+            lastInsertedType = type
             callInitiatedTimeMs = System.currentTimeMillis()
             lastInitiatedType = type
+            _lastCallEvaluation.value = null
 
             if (directCall) {
                 val callStarted = CallHelper.makeDirectCall(context, dialSequence)
                 if (callStarted) {
+                    repository.updateReading(reading.copy(id = insertedId, isCallExecuted = true))
                     _userMessage.value = "Apelul automat a fost inițiat! Robotul preia secvența."
                 } else {
                     _userMessage.value = "Deschidere în tastatură (permisiune apel necesară pentru apel direct)."
@@ -246,43 +239,106 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Recomputes previous index, consumption and cost for every reading of a utility,
+     * so that editing or deleting one reading never leaves its neighbours stale.
+     */
+    private suspend fun recalculateChain(type: UtilityType) {
+        var previous: Double? = null
+        for (item in repository.getReadingsByTypeAsc(type)) {
+            val consumption = if (previous != null) (item.indexValue - previous).coerceAtLeast(0.0) else 0.0
+            val fixed = item.copy(
+                previousIndexValue = previous,
+                consumption = consumption,
+                estimatedCost = consumption * item.unitPrice
+            )
+            if (fixed != item) repository.updateReading(fixed)
+            previous = item.indexValue
+        }
+    }
+
     fun updateReading(reading: MeterReading) {
         viewModelScope.launch {
             repository.updateReading(reading)
+            recalculateChain(reading.utilityType)
             _userMessage.value = "Înregistrarea a fost actualizată!"
         }
     }
 
     fun undoLastReading() {
         val id = lastInitiatedReadingId ?: return
+        val type = lastInsertedType
         viewModelScope.launch {
             repository.deleteById(id)
+            if (type != null) recalculateChain(type)
             lastInitiatedReadingId = null
+            lastInsertedType = null
             _lastCallEvaluation.value = null
             _userMessage.value = "Ultimul index a fost anulat și șters din istoric."
         }
     }
 
+    private suspend fun markLastReadingAsCalled(type: UtilityType) {
+        val id = lastInitiatedReadingId ?: return
+        val latest = repository.getLatestReadingSync(type) ?: return
+        if (latest.id == id && !latest.isCallExecuted) {
+            repository.updateReading(latest.copy(isCallExecuted = true))
+        }
+    }
+
     /**
      * Verifies the call outcome by inspecting the Android call log duration.
+     * The call log is written when the call ends, so until then there is nothing to read
+     * and we simply keep waiting. Once a call that started after our request is found it is
+     * evaluated exactly once. The log only tells us how long the call lasted, not whether the
+     * robot accepted the index, so the messages are deliberately cautious.
      */
     fun verifyCallOutcome(context: Context) {
-        if (callInitiatedTimeMs == 0L || lastInitiatedType == null) return
+        val startedAt = callInitiatedTimeMs
+        val type = lastInitiatedType
+        if (startedAt == 0L || type == null || verifying) return
 
-        val type = lastInitiatedType ?: return
-        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
-        val expectedPhone = config?.phoneNumber ?: type.defaultPhone
+        if (!CallLogHelper.hasCallLogPermission(context)) {
+            // Without the permission the outcome can never be read: stop waiting
+            callInitiatedTimeMs = 0L
+            lastInitiatedType = null
+            return
+        }
 
+        val expectedPhone = configFor(type)?.phoneNumber ?: type.defaultPhone
+
+        verifying = true
         viewModelScope.launch {
-            kotlinx.coroutines.delay(1200)
-            val entry = CallLogHelper.checkLatestOutgoingCall(context, callInitiatedTimeMs, expectedPhone)
-            val result = CallLogHelper.evaluateCall(entry, type)
-            _lastCallEvaluation.value = result
+            try {
+                delay(1200)
+                val entry = CallLogHelper.checkLatestOutgoingCall(context, startedAt, expectedPhone)
+                    ?.takeIf { it.date >= startedAt - 5_000L }
 
-            if (result.status == CallStatusEvaluation.CANCELLED_OR_MISSED) {
-                _userMessage.value = "Apel anulat imediat (0s). Indexul nu a fost transmis!"
-            } else if (result.status == CallStatusEvaluation.CONFIRMED_SUCCESS) {
-                _userMessage.value = "Apel confirmat (${result.durationSeconds}s)! Indexul a fost transmis."
+                if (entry == null) {
+                    if (System.currentTimeMillis() - startedAt > PENDING_CALL_TIMEOUT_MS) {
+                        callInitiatedTimeMs = 0L
+                        lastInitiatedType = null
+                    }
+                    return@launch
+                }
+
+                callInitiatedTimeMs = 0L
+                lastInitiatedType = null
+
+                val result = CallLogHelper.evaluateCall(entry, type)
+                _lastCallEvaluation.value = result
+
+                when (result.status) {
+                    CallStatusEvaluation.CANCELLED_OR_MISSED ->
+                        _userMessage.value = "Apel anulat imediat (0s). Indexul nu a fost transmis!"
+                    CallStatusEvaluation.CONFIRMED_SUCCESS -> {
+                        markLastReadingAsCalled(type)
+                        _userMessage.value = "Apel de ${result.durationSeconds}s. Probabil transmis; robotul nu poate confirma automat."
+                    }
+                    else -> Unit
+                }
+            } finally {
+                verifying = false
             }
         }
     }
@@ -298,11 +354,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val type = _activeUtility.value
-        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
+        val config = configFor(type)
         val prevReading = if (type == UtilityType.GAS) latestGasReading.value else latestElectricityReading.value
 
         val prevVal = prevReading?.indexValue
-        val consumption = if (prevVal != null) (indexVal - prevVal).coerceAtLeast(0.0) else 0.0
+        if (prevVal != null && indexVal < prevVal) {
+            _userMessage.value = "Indexul nou (${indexVal.toLong()}) este mai mic decât cel anterior (${prevVal.toLong()}). Verifică contorul."
+            return
+        }
+
+        val consumption = if (prevVal != null) indexVal - prevVal else 0.0
         val price = config?.unitPrice ?: type.defaultPrice
         val estimatedCost = consumption * price
         val dialSequence = getFullDialString(type, config, _indexInput.value)
@@ -330,14 +391,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteReading(reading: MeterReading) {
         viewModelScope.launch {
             repository.deleteReading(reading)
+            recalculateChain(reading.utilityType)
             _userMessage.value = "Înregistrarea a fost ștearsă."
         }
     }
 
+    /**
+     * Works out the dial template to store with a saved config.
+     *
+     * - If the user edited the template, it is kept as typed.
+     * - If it was still the default template, it is rebuilt from the new phone / client code.
+     * - If it was customised earlier, the old client code / phone inside it are replaced.
+     */
+    private fun resolveTemplate(previous: UtilityConfig?, config: UtilityConfig): String {
+        val type = config.utilityType
+        if (previous == null) return type.ivrTemplateFor(config.phoneNumber, config.clientCode)
+        if (config.ivrTemplate != previous.ivrTemplate) return config.ivrTemplate
+
+        val wasDefault = previous.ivrTemplate == type.ivrTemplateFor(previous.phoneNumber, previous.clientCode)
+        if (wasDefault) return type.ivrTemplateFor(config.phoneNumber, config.clientCode)
+
+        var template = config.ivrTemplate
+        if (previous.clientCode.isNotBlank() && previous.clientCode != config.clientCode) {
+            template = template.replace(previous.clientCode, config.clientCode)
+        }
+        if (previous.phoneNumber.isNotBlank() && previous.phoneNumber != config.phoneNumber) {
+            template = template.replace(previous.phoneNumber, config.phoneNumber)
+        }
+        return template
+    }
+
     fun updateConfig(config: UtilityConfig) {
         viewModelScope.launch {
-            repository.saveConfig(config)
-            _userMessage.value = "Setările pentru ${config.utilityType.title} au fost actualizate!"
+            val previous = configFor(config.utilityType)
+            val updated = config.copy(ivrTemplate = resolveTemplate(previous, config))
+
+            repository.saveConfig(updated)
+
+            // Apply the chosen reminder day / hour right away
+            val context = getApplication<Application>()
+            if (updated.isReminderEnabled) {
+                ReminderScheduler.scheduleNext(
+                    context,
+                    updated.utilityType,
+                    updated.reminderDayOfMonth,
+                    updated.reminderHour,
+                    updated.reminderMinute
+                )
+            } else {
+                ReminderScheduler.cancel(context, updated.utilityType)
+            }
+
+            _userMessage.value = "Setările pentru ${updated.utilityType.title} au fost actualizate!"
         }
     }
 
@@ -352,8 +457,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * that the robot receives the client code and asks for the index.
      */
     fun triggerTestCall(context: Context, type: UtilityType, directCall: Boolean = true) {
-        val config = if (type == UtilityType.GAS) gasConfig.value else electricityConfig.value
-        val template = config?.ivrTemplate ?: type.defaultIvrTemplate
+        if (clientCodeMissing(type)) {
+            _userMessage.value = "Completăm întâi codul de client pentru ${type.title}."
+            return
+        }
+
+        val template = configFor(type)?.ivrTemplate ?: type.defaultIvrTemplate
         val testSequence = IvrSequenceBuilder.buildTestSequenceUntilIndex(template)
 
         if (directCall) {
@@ -369,16 +478,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun exportPdfReport(context: Context, periodLabel: String) {
+    /**
+     * Generates the PDF for the readings made since [sinceMs] (all of them when null).
+     */
+    fun exportPdfReport(context: Context, periodLabel: String, sinceMs: Long?) {
         viewModelScope.launch {
-            val readings = allReadings.value
-            val pdfFile = PdfReportGenerator.generateMonthlyReport(
-                context = context,
-                periodName = periodLabel,
-                readings = readings,
-                gasConfig = gasConfig.value,
-                electricityConfig = electricityConfig.value
-            )
+            val readings = allReadings.value.let { all ->
+                if (sinceMs == null) all else all.filter { it.timestamp >= sinceMs }
+            }
+
+            val pdfFile = withContext(Dispatchers.IO) {
+                PdfReportGenerator.generateMonthlyReport(
+                    context = context,
+                    periodName = periodLabel,
+                    readings = readings,
+                    gasConfig = gasConfig.value,
+                    electricityConfig = electricityConfig.value
+                )
+            }
 
             if (pdfFile != null && pdfFile.exists()) {
                 _generatedPdf.value = pdfFile
@@ -386,6 +503,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 PdfReportGenerator.sharePdf(context, pdfFile)
             } else {
                 _userMessage.value = "Eroare la generarea fișierului PDF."
+            }
+        }
+    }
+
+    /**
+     * Exports the whole history as a CSV file, as a backup that also opens in Excel.
+     */
+    fun exportCsv(context: Context) {
+        viewModelScope.launch {
+            val readings = allReadings.value
+            if (readings.isEmpty()) {
+                _userMessage.value = "Nu există citiri de exportat."
+                return@launch
+            }
+
+            val csvFile = withContext(Dispatchers.IO) { CsvExporter.generate(context, readings) }
+            if (csvFile != null && csvFile.exists()) {
+                CsvExporter.share(context, csvFile)
+            } else {
+                _userMessage.value = "Eroare la exportul CSV."
+            }
+        }
+    }
+
+    /**
+     * Restores readings from a CSV file made by [exportCsv]. Readings that are already stored
+     * (same utility, minute and index) are not added twice, so importing the same file again
+     * is harmless.
+     */
+    fun importCsv(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                try {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            if (text == null) {
+                _userMessage.value = "Nu am putut citi fișierul ales."
+                return@launch
+            }
+
+            val parsed = CsvImporter.parse(text)
+            if (parsed.readings.isEmpty()) {
+                _userMessage.value = "Fișierul nu conține citiri valide."
+                return@launch
+            }
+
+            val known = mutableSetOf<Triple<UtilityType, Long, Double>>()
+            for (type in UtilityType.values()) {
+                repository.getReadingsByTypeAsc(type).forEach {
+                    known.add(Triple(type, it.timestamp / 60_000L, it.indexValue))
+                }
+            }
+
+            var added = 0
+            val touched = mutableSetOf<UtilityType>()
+            for (reading in parsed.readings) {
+                val key = Triple(reading.utilityType, reading.timestamp / 60_000L, reading.indexValue)
+                if (known.add(key)) {
+                    repository.insertReading(reading)
+                    touched.add(reading.utilityType)
+                    added++
+                }
+            }
+            touched.forEach { recalculateChain(it) }
+
+            val duplicates = parsed.readings.size - added
+            _userMessage.value = buildString {
+                append("Importate $added citiri")
+                if (duplicates > 0) append(" ($duplicates existau deja)")
+                if (parsed.skippedLines > 0) append(", ${parsed.skippedLines} linii ignorate")
+                append(".")
             }
         }
     }

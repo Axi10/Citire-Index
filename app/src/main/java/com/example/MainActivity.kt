@@ -1,16 +1,23 @@
 package com.example
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.ElectricBolt
-import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
@@ -31,16 +38,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.UtilityType
 import com.example.notifications.ReminderNotificationReceiver
 import com.example.notifications.ReminderScheduler
 import com.example.ui.MainViewModel
+import com.example.ui.UiPreferences
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.PdfReportsScreen
 import com.example.ui.screens.SettingsScreen
@@ -55,6 +66,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        UiPreferences.load(this)
+
         // Ensure notification channel is registered & reminders scheduled
         ReminderNotificationReceiver.ensureChannel(this)
         ReminderScheduler.rescheduleAll(this)
@@ -62,7 +75,9 @@ class MainActivity : ComponentActivity() {
         val notificationUtility = intent.getStringExtra(ReminderNotificationReceiver.EXTRA_UTILITY_TYPE)
 
         setContent {
-            MyApplicationTheme {
+            val dynamicColor by UiPreferences.dynamicColor.collectAsStateWithLifecycle()
+
+            MyApplicationTheme(dynamicColor = dynamicColor) {
                 val viewModel: MainViewModel = viewModel()
 
                 // If launched from notification, activate that utility tab
@@ -86,12 +101,14 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val activeUtility by viewModel.activeUtility.collectAsStateWithLifecycle()
     val currentConfig by viewModel.currentConfig.collectAsStateWithLifecycle()
     val currentLatestReading by viewModel.currentLatestReading.collectAsStateWithLifecycle()
+    val lastTransmittedAt by viewModel.currentLastTransmittedAt.collectAsStateWithLifecycle()
     val indexInput by viewModel.indexInput.collectAsStateWithLifecycle()
     val allReadings by viewModel.allReadings.collectAsStateWithLifecycle()
     val gasConfig by viewModel.gasConfig.collectAsStateWithLifecycle()
@@ -99,6 +116,25 @@ fun MainScreen(viewModel: MainViewModel) {
     val lastGeneratedPdf by viewModel.generatedPdf.collectAsStateWithLifecycle()
     val userMessage by viewModel.userMessage.collectAsStateWithLifecycle()
     val callEvaluation by viewModel.lastCallEvaluation.collectAsStateWithLifecycle()
+    val dynamicColor by UiPreferences.dynamicColor.collectAsStateWithLifecycle()
+
+    // From another tab, Back goes to the main screen first instead of closing the app
+    BackHandler(enabled = selectedTab != 0) {
+        viewModel.setTab(0)
+    }
+
+    // Monthly reminders are useless without the notification permission (Android 13+),
+    // so ask for it on the first launch instead of leaving it buried in Settings.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
@@ -115,114 +151,136 @@ fun MainScreen(viewModel: MainViewModel) {
 
     LaunchedEffect(userMessage) {
         userMessage?.let {
+            // A short tick so the result of an action is felt, not only read
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             snackbarHostState.showSnackbar(it)
             viewModel.clearUserMessage()
         }
     }
 
     val topBarTitle = when (selectedTab) {
-        0 -> "Index Utilități — Transmitere"
-        1 -> "Istoric & Statistici Consum"
-        2 -> "Rapoarte PDF & Evidență"
-        3 -> "Configurare IVR & Notificări"
-        else -> "Index Utilități"
+        0 -> "Index"
+        1 -> "Istoric"
+        2 -> "Rapoarte"
+        3 -> "Setări"
+        else -> "Index"
     }
+
+    // The indicator of the navigation bar follows the meter that is open
+    val accent = if (activeUtility == UtilityType.GAS) GasCyan else ElectricityAmber
+    val navColors = NavigationBarItemDefaults.colors(indicatorColor = accent.copy(alpha = 0.22f))
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
                         text = topBarTitle,
-                        fontSize = 18.sp,
+                        fontSize = 28.sp,
                         fontWeight = FontWeight.Bold
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         },
         bottomBar = {
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp
+                tonalElevation = 0.dp
             ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { viewModel.setTab(0) },
                     icon = { Icon(Icons.Default.PhoneInTalk, contentDescription = "Transmitere") },
-                    label = { Text("Transmitere", fontSize = 11.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = if (activeUtility == UtilityType.GAS) GasCyan.copy(alpha = 0.2f) else ElectricityAmber.copy(alpha = 0.2f)
-                    )
+                    label = { Text("Index", fontSize = 11.sp) },
+                    colors = navColors
                 )
 
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { viewModel.setTab(1) },
                     icon = { Icon(Icons.Default.BarChart, contentDescription = "Istoric") },
-                    label = { Text("Istoric", fontSize = 11.sp) }
+                    label = { Text("Istoric", fontSize = 11.sp) },
+                    colors = navColors
                 )
 
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { viewModel.setTab(2) },
-                    icon = { Icon(Icons.Default.PictureAsPdf, contentDescription = "PDF") },
-                    label = { Text("Raport PDF", fontSize = 11.sp) }
+                    icon = { Icon(Icons.Default.PictureAsPdf, contentDescription = "Rapoarte") },
+                    label = { Text("Rapoarte", fontSize = 11.sp) },
+                    colors = navColors
                 )
 
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { viewModel.setTab(3) },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Setări") },
-                    label = { Text("Setări", fontSize = 11.sp) }
+                    label = { Text("Setări", fontSize = 11.sp) },
+                    colors = navColors
                 )
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
+        // With edge-to-edge enforced (Android 15+) the window no longer shrinks for the keyboard,
+        // so the content must apply the IME inset itself or the keyboard covers the index field.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
+                .imePadding()
         ) {
-            when (selectedTab) {
-                0 -> TransmitScreen(
-                    activeUtility = activeUtility,
-                    config = currentConfig,
-                    latestReading = currentLatestReading,
-                    indexInput = indexInput,
-                    callEvaluation = callEvaluation,
-                    onUtilitySelected = { viewModel.selectUtility(it) },
-                    onIndexChanged = { viewModel.updateIndexInput(it) },
-                    onTransmitAndCall = { directCall -> viewModel.transmitAndCall(context, directCall) },
-                    onSaveOnly = { viewModel.saveReadingOnly() },
-                    onUndoLastReading = { viewModel.undoLastReading() },
-                    onDismissCallEvaluation = { viewModel.clearLastCallEvaluation() }
-                )
+            Crossfade(targetState = selectedTab, label = "tabs") { tab ->
+                when (tab) {
+                    0 -> TransmitScreen(
+                        activeUtility = activeUtility,
+                        config = currentConfig,
+                        latestReading = currentLatestReading,
+                        lastTransmittedAt = lastTransmittedAt,
+                        indexInput = indexInput,
+                        callEvaluation = callEvaluation,
+                        onUtilitySelected = { viewModel.selectUtility(it) },
+                        onIndexChanged = { viewModel.updateIndexInput(it) },
+                        onTransmitAndCall = { directCall -> viewModel.transmitAndCall(context, directCall) },
+                        onSaveOnly = { viewModel.saveReadingOnly() },
+                        onUndoLastReading = { viewModel.undoLastReading() },
+                        onDismissCallEvaluation = { viewModel.clearLastCallEvaluation() },
+                        onOpenSettings = { viewModel.setTab(3) }
+                    )
 
-                1 -> HistoryScreen(
-                    readings = allReadings,
-                    onDeleteReading = { viewModel.deleteReading(it) },
-                    onUpdateReading = { viewModel.updateReading(it) }
-                )
+                    1 -> HistoryScreen(
+                        readings = allReadings,
+                        onDeleteReading = { viewModel.deleteReading(it) },
+                        onUpdateReading = { viewModel.updateReading(it) }
+                    )
 
-                2 -> PdfReportsScreen(
-                    readings = allReadings,
-                    lastGeneratedFile = lastGeneratedPdf,
-                    onExportPdf = { periodName -> viewModel.exportPdfReport(context, periodName) }
-                )
+                    2 -> PdfReportsScreen(
+                        readings = allReadings,
+                        lastGeneratedFile = lastGeneratedPdf,
+                        onExportPdf = { periodName, sinceMs -> viewModel.exportPdfReport(context, periodName, sinceMs) },
+                        onExportCsv = { viewModel.exportCsv(context) },
+                        onImportCsv = { uri -> viewModel.importCsv(context, uri) }
+                    )
 
-                3 -> SettingsScreen(
-                    gasConfig = gasConfig,
-                    electricityConfig = electricityConfig,
-                    onSaveConfig = { viewModel.updateConfig(it) },
-                    onTestNotification = { type -> viewModel.triggerTestNotification(context, type) },
-                    onTestCall = { type, directCall -> viewModel.triggerTestCall(context, type, directCall) }
-                )
+                    3 -> SettingsScreen(
+                        gasConfig = gasConfig,
+                        electricityConfig = electricityConfig,
+                        onSaveConfig = { viewModel.updateConfig(it) },
+                        onTestNotification = { type -> viewModel.triggerTestNotification(context, type) },
+                        onTestCall = { type, directCall -> viewModel.triggerTestCall(context, type, directCall) },
+                        dynamicColor = dynamicColor,
+                        onDynamicColorChange = { enabled -> UiPreferences.setDynamicColor(context, enabled) }
+                    )
+
+                    else -> Unit
+                }
             }
         }
     }

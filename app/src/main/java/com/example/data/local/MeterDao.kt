@@ -18,6 +18,9 @@ interface MeterDao {
     @Query("SELECT * FROM meter_readings WHERE utilityType = :type ORDER BY timestamp DESC")
     fun getReadingsByType(type: UtilityType): Flow<List<MeterReading>>
 
+    @Query("SELECT * FROM meter_readings WHERE utilityType = :type ORDER BY timestamp ASC, id ASC")
+    suspend fun getReadingsByTypeAsc(type: UtilityType): List<MeterReading>
+
     @Query("SELECT * FROM meter_readings WHERE utilityType = :type ORDER BY timestamp DESC LIMIT 1")
     fun getLatestReading(type: UtilityType): Flow<MeterReading?>
 

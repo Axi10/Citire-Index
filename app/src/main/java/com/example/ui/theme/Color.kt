@@ -2,9 +2,9 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val EnergyNavyDark = Color(0xFF0A0F1D)
-val EnergySlateDark = Color(0xFF1E293B)
-val EnergyCardDark = Color(0xFF172033)
+val EnergyNavyDark = Color(0xFF05080F)
+val EnergySlateDark = Color(0xFF0E1524)
+val EnergyCardDark = Color(0xFF151D30)
 
 val GasCyan = Color(0xFF0284C7)
 val GasCyanLight = Color(0xFF38BDF8)
@@ -19,7 +19,7 @@ val ElectricityAmberDark = Color(0xFFD97706)
 val CostGreen = Color(0xFF10B981)
 val CostGreenContainer = Color(0xFFD1FAE5)
 
-val SurfaceLight = Color(0xFFF8FAFC)
+val SurfaceLight = Color(0xFFF3F5F9)
 val SurfaceCardLight = Color(0xFFFFFFFF)
 val TextPrimaryLight = Color(0xFF0F172A)
 val TextSecondaryLight = Color(0xFF64748B)

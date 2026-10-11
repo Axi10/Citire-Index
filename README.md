@@ -22,17 +22,9 @@ Introduci indexul de pe contor (sau îl scanezi cu camera), iar aplicația apele
 
 ## Cum obții APK-ul
 
-### Metoda 1: Ultima versiune, din GitHub Actions
-1. Deschide fila **Actions** și alege ultima rulare `Build Android APK` cu bifă verde.
-2. La **Artifacts** descarcă `index-utilitati-apk` (arhivă ZIP cu APK-ul în ea).
+Deschide secțiunea **Releases** a depozitului și descarcă `index-utilitati.apk` din cea mai nouă versiune. Permite instalarea din surse necunoscute dacă ți se cere.
 
-Rularea pornește la fiecare push pe `main` sau manual (**Run workflow**). Fiecare build are numărul versiunii egal cu numărul rulării (`1.1.<număr>`), deci este mai nou decât cel anterior.
-
-### Metoda 2: APK-ul precompilat din depozit
-- [`public/index-utilitati.apk`](./public/index-utilitati.apk)
-- [`release/index-utilitati.apk`](./release/index-utilitati.apk)
-
-Pot fi mai vechi decât codul. Permite instalarea din surse necunoscute dacă ți se cere.
+Un build nou pornește manual (**Actions → Build Android APK → Run workflow**). Fiecare build are numărul versiunii egal cu numărul rulării (`1.1.<număr>`), deci este mai nou decât cel anterior. APK-ul se mai găsește și la **Artifacts**, în rularea respectivă.
 
 ## Actualizarea peste versiunea instalată
 

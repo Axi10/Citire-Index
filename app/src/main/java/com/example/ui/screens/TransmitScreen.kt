@@ -138,14 +138,17 @@ fun TransmitScreen(
         latestReading?.let { SimpleDateFormat("dd MMM yyyy", Locale("ro", "RO")).format(Date(it.timestamp)) }
     }
 
-    // Meter Scanner Dialog
+    // Meter Scanner Dialog. The scanner gets the previous index and a plausible jump (a few months
+    // of consumption), so it can tell the real index from serial numbers and red decimals.
     if (showScannerDialog) {
         MeterScannerDialog(
             onDismiss = { showScannerDialog = false },
             onIndexDetected = { detectedIndex ->
                 onIndexChanged(detectedIndex)
                 showScannerDialog = false
-            }
+            },
+            previousIndex = prevIndexVal?.toLong(),
+            maxJump = if (activeUtility == UtilityType.GAS) 600L else 1000L
         )
     }
 

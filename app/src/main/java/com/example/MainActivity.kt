@@ -159,64 +159,70 @@ fun MainScreen(viewModel: MainViewModel) {
     }
 
     val topBarTitle = when (selectedTab) {
-        0 -> "Index Utilități — Transmitere"
-        1 -> "Istoric & Statistici Consum"
-        2 -> "Rapoarte PDF & Evidență"
-        3 -> "Configurare IVR & Notificări"
-        else -> "Index Utilități"
+        0 -> "Index"
+        1 -> "Istoric"
+        2 -> "Rapoarte"
+        3 -> "Setări"
+        else -> "Index"
     }
+
+    // The indicator of the navigation bar follows the meter that is open
+    val accent = if (activeUtility == UtilityType.GAS) GasCyan else ElectricityAmber
+    val navColors = NavigationBarItemDefaults.colors(indicatorColor = accent.copy(alpha = 0.22f))
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
                         text = topBarTitle,
-                        fontSize = 18.sp,
+                        fontSize = 28.sp,
                         fontWeight = FontWeight.Bold
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         },
         bottomBar = {
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp
+                tonalElevation = 0.dp
             ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { viewModel.setTab(0) },
                     icon = { Icon(Icons.Default.PhoneInTalk, contentDescription = "Transmitere") },
-                    label = { Text("Transmitere", fontSize = 11.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = if (activeUtility == UtilityType.GAS) GasCyan.copy(alpha = 0.2f) else ElectricityAmber.copy(alpha = 0.2f)
-                    )
+                    label = { Text("Index", fontSize = 11.sp) },
+                    colors = navColors
                 )
 
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { viewModel.setTab(1) },
                     icon = { Icon(Icons.Default.BarChart, contentDescription = "Istoric") },
-                    label = { Text("Istoric", fontSize = 11.sp) }
+                    label = { Text("Istoric", fontSize = 11.sp) },
+                    colors = navColors
                 )
 
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { viewModel.setTab(2) },
-                    icon = { Icon(Icons.Default.PictureAsPdf, contentDescription = "PDF") },
-                    label = { Text("Raport PDF", fontSize = 11.sp) }
+                    icon = { Icon(Icons.Default.PictureAsPdf, contentDescription = "Rapoarte") },
+                    label = { Text("Rapoarte", fontSize = 11.sp) },
+                    colors = navColors
                 )
 
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { viewModel.setTab(3) },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Setări") },
-                    label = { Text("Setări", fontSize = 11.sp) }
+                    label = { Text("Setări", fontSize = 11.sp) },
+                    colors = navColors
                 )
             }
         },

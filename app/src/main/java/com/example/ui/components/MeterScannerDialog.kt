@@ -27,6 +27,7 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -77,6 +78,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect as UiRect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -113,10 +117,13 @@ private const val MIN_VOTES_WITH_PREVIOUS = 2
 private const val MIN_VOTES_WITHOUT_PREVIOUS = 3
 
 // Used until the layout of the screen is known (fractions of the visible camera picture)
-private val DEFAULT_ROI = floatArrayOf(0.05f, 0.30f, 0.95f, 0.55f)
+private val DEFAULT_ROI = floatArrayOf(0.05f, 0.30f, 0.95f, 0.45f)
 
 // Zoom buttons offered when the camera supports them (a Galaxy S25 Ultra has telephoto lenses)
 private val ZOOM_STEPS = listOf(1f, 2f, 3f, 5f)
+
+// Letters that the recognizer often returns instead of digits; any other letter means the line is text
+private const val DIGIT_LOOKALIKES = "OoDQIliZzSsB"
 
 @Composable
 fun MeterScannerDialog(
@@ -216,6 +223,10 @@ private fun CameraScannerContent(
     var cameraError by remember { mutableStateOf(false) }
     var showTips by remember { mutableStateOf(false) }
 
+    // Diagnostic panel: the crop that is really read and the raw text the recognizer returned
+    var debugThumb by remember { mutableStateOf<ImageBitmap?>(null) }
+    var debugText by remember { mutableStateOf("") }
+
     // The number in the editable field. It follows the best suggestion until the user touches it.
     var fieldText by remember { mutableStateOf("") }
     var userEdited by remember { mutableStateOf(false) }
@@ -312,13 +323,13 @@ private fun CameraScannerContent(
                         val minVotes = if (previousIndex != null) MIN_VOTES_WITH_PREVIOUS else MIN_VOTES_WITHOUT_PREVIOUS
                         imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
                             try {
-                                val detections = readFrame(
+                                val frame = readFrame(
                                     proxy = imageProxy,
                                     recognizer = textRecognizer,
                                     roi = regionOfInterest(previewBounds.get(), boxBounds.get())
                                 )
                                 val ranked = synchronized(recentFrames) {
-                                    recentFrames.add(detections)
+                                    recentFrames.add(frame.detections)
                                     if (recentFrames.size > RECENT_FRAMES) recentFrames.removeAt(0)
                                     IndexCandidatePicker.suggest(
                                         frames = recentFrames.toList(),
@@ -329,7 +340,11 @@ private fun CameraScannerContent(
                                 }
                                 // Compose state is updated on the main thread; once the user has
                                 // touched the result it is frozen so it does not change under them
-                                mainExecutor.execute { if (!userEdited) suggestions = ranked }
+                                mainExecutor.execute {
+                                    debugThumb = frame.thumb?.asImageBitmap()
+                                    debugText = frame.debug
+                                    if (!userEdited) suggestions = ranked
+                                }
                             } catch (e: Exception) {
                                 // A bad frame (or a recognizer closed meanwhile) is simply skipped
                             } finally {
@@ -412,20 +427,21 @@ private fun CameraScannerContent(
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // A thin strip: it is meant for the row of black drums only
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.9f)
-                    .height(96.dp)
+                    .height(64.dp)
                     .onGloballyPositioned { boxBounds.set(it.boundsInWindow()) }
-                    .border(BorderStroke(2.5.dp, MaterialTheme.colorScheme.primary), RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(14.dp)),
+                    .border(BorderStroke(2.5.dp, MaterialTheme.colorScheme.primary), RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 if (best != null) {
                     Text(
                         text = best.display,
                         color = Color(0xFF69F0AE),
-                        fontSize = 34.sp,
+                        fontSize = 30.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
@@ -455,6 +471,35 @@ private fun CameraScannerContent(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
                             )
                         }
+                    }
+                }
+            }
+
+            // Diagnostic panel (temporary): what the scanner really sees and what it reads
+            val thumb = debugThumb
+            if (thumb != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(0.9f),
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color.Black.copy(alpha = 0.7f)
+                ) {
+                    Column(modifier = Modifier.padding(6.dp)) {
+                        Image(
+                            bitmap = thumb,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                        )
+                        Text(
+                            text = debugText,
+                            color = Color(0xFFB2FF59),
+                            fontSize = 10.sp,
+                            lineHeight = 12.sp,
+                            maxLines = 4
+                        )
                     }
                 }
             }
@@ -587,9 +632,9 @@ private fun CameraScannerContent(
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = if (previousIndex != null) {
-                                "Pune cifrele negre în chenar · ultimul: $previousIndex"
+                                "Cifrele negre în chenar · ultimul: $previousIndex"
                             } else {
-                                "Pune cifrele negre în chenar"
+                                "Cifrele negre în chenar"
                             },
                             color = Color.White,
                             fontSize = 13.sp
@@ -616,16 +661,19 @@ private fun regionOfInterest(preview: UiRect?, box: UiRect?): FloatArray {
     val top = ((box.top - preview.top) / preview.height).coerceIn(0f, 1f)
     val right = ((box.right - preview.left) / preview.width).coerceIn(0f, 1f)
     val bottom = ((box.bottom - preview.top) / preview.height).coerceIn(0f, 1f)
-    return if (right - left < 0.05f || bottom - top < 0.02f) DEFAULT_ROI else floatArrayOf(left, top, right, bottom)
+    return if (right - left < 0.05f || bottom - top < 0.01f) DEFAULT_ROI else floatArrayOf(left, top, right, bottom)
 }
+
+/** What one frame gave: the numbers found, a text for the diagnostic panel and the crop that was read. */
+private class FrameResult(val detections: List<Detection>, val debug: String, val thumb: Bitmap?)
 
 /**
  * Reads one camera frame: crops it to the framing box, cuts off the red decimal drums, and reads
- * two enhanced versions of the crop (contrast, and inverted for light digits on dark drums).
- * Runs on the analyzer thread, so it may wait for the recognizer.
+ * three versions of the crop (as it is, with more contrast, and inverted for light digits on
+ * dark drums). Runs on the analyzer thread, so it may wait for the recognizer.
  */
 @SuppressLint("UnsafeOptInUsageError")
-private fun readFrame(proxy: ImageProxy, recognizer: TextRecognizer, roi: FloatArray): List<Detection> {
+private fun readFrame(proxy: ImageProxy, recognizer: TextRecognizer, roi: FloatArray): FrameResult {
     var visible = proxy.toBitmap()
 
     // With a view port the frame carries the crop that matches the preview; apply it unless the
@@ -660,18 +708,25 @@ private fun readFrame(proxy: ImageProxy, recognizer: TextRecognizer, roi: FloatA
     region = cutRedDecimals(region)
 
     // Small crops are enlarged: the recognizer reads small characters badly
-    if (region.width in 2..899) {
-        val scaledHeight = max(2, (region.height * 900f / region.width).toInt())
-        region = Bitmap.createScaledBitmap(region, 900, scaledHeight, true)
+    if (region.width in 2..1199) {
+        val scaledHeight = max(2, (region.height * 1200f / region.width).toInt())
+        region = Bitmap.createScaledBitmap(region, 1200, scaledHeight, true)
     }
 
     val detections = ArrayList<Detection>()
-    for (negative in listOf(false, true)) {
-        val enhanced = enhance(region, negative)
-        val text = Tasks.await(recognizer.process(InputImage.fromBitmap(enhanced, 0)))
-        detections.addAll(detectionsFrom(text, enhanced.height))
+    val debug = StringBuilder()
+    var thumb: Bitmap? = null
+    // 0 = as it is, 1 = more contrast, 2 = more contrast and inverted
+    for (mode in 0..2) {
+        val image = if (mode == 0) region else enhance(region, negative = mode == 2)
+        if (mode == 1) thumb = image
+        val text = Tasks.await(recognizer.process(InputImage.fromBitmap(image, 0)))
+        detections.addAll(detectionsFrom(text, image.height))
+        debug.append("${'A' + mode}: ").append(text.text.replace('\n', '|').take(40)).append("   ")
     }
-    return detections
+    val found = detections.map { it.digits }.distinct().joinToString(",")
+    debug.append("→ ").append(found.ifEmpty { "nimic" })
+    return FrameResult(detections, debug.toString(), thumb)
 }
 
 /**
@@ -745,20 +800,26 @@ private data class Piece(val digits: String, val box: Rect)
 
 /**
  * The numbers found in a crop. A drum meter is often read digit by digit, so digits that are on
- * the same row and close to each other are glued together, left to right.
+ * the same row and close to each other are glued together, left to right. Lines that contain
+ * text (serial number, standards, model) are ignored, and so are numbers much smaller than the
+ * biggest one: the index is printed in the biggest digits of the strip.
  */
 private fun detectionsFrom(text: VisionText, cropHeight: Int): List<Detection> {
-    val pieces = ArrayList<Piece>()
+    val allPieces = ArrayList<Piece>()
     for (block in text.textBlocks) {
         for (line in block.lines) {
+            if (line.text.any { it.isLetter() && it !in DIGIT_LOOKALIKES }) continue
             for (element in line.elements) {
                 val box = element.boundingBox ?: continue
                 val digits = cleanToken(element.text) ?: continue
-                pieces.add(Piece(digits, box))
+                allPieces.add(Piece(digits, box))
             }
         }
     }
-    if (pieces.isEmpty()) return emptyList()
+    if (allPieces.isEmpty()) return emptyList()
+
+    val tallest = allPieces.maxOf { it.box.height() }
+    val pieces = allPieces.filter { it.box.height() >= tallest * 0.6f }
 
     // Group into rows by vertical position
     val rows = ArrayList<MutableList<Piece>>()

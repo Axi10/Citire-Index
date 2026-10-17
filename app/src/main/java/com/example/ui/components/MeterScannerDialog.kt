@@ -3,6 +3,13 @@ package com.example.ui.components
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Rect
 import android.util.Size
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -14,6 +21,7 @@ import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -22,6 +30,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,20 +39,22 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -64,7 +75,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect as UiRect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -80,24 +94,26 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.scan.Detection
 import com.example.scan.IndexCandidatePicker
 import com.example.scan.IndexSuggestion
+import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text as VisionText
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.max
+import kotlin.math.min
 
-// How many of the latest frames are kept, and in how many of them a number must appear
-// before it is offered to the user (a single frame is often a misread)
+// How many of the latest frames are kept, and in how many of them a number must appear before it
+// is offered. With a previous index to compare against, a wrong number is rare, so 2 is enough.
 private const val RECENT_FRAMES = 8
-private const val MIN_FRAME_VOTES = 3
+private const val MIN_VOTES_WITH_PREVIOUS = 2
+private const val MIN_VOTES_WITHOUT_PREVIOUS = 3
 
-// Only the middle band of the picture is read: that is where the viewfinder is aimed. Serial
-// numbers, years and plate texts around it are ignored (fractions of the frame).
-private const val ROI_TOP = 0.28f
-private const val ROI_BOTTOM = 0.72f
-private const val ROI_LEFT = 0.03f
-private const val ROI_RIGHT = 0.97f
+// Used until the layout of the screen is known (fractions of the visible camera picture)
+private val DEFAULT_ROI = floatArrayOf(0.05f, 0.30f, 0.95f, 0.55f)
 
 // Zoom buttons offered when the camera supports them (a Galaxy S25 Ultra has telephoto lenses)
 private val ZOOM_STEPS = listOf(1f, 2f, 3f, 5f)
@@ -106,8 +122,7 @@ private val ZOOM_STEPS = listOf(1f, 2f, 3f, 5f)
 fun MeterScannerDialog(
     onDismiss: () -> Unit,
     onIndexDetected: (String) -> Unit,
-    // The last saved index of this meter: lets the scanner reject numbers that cannot be the
-    // next reading, and drop the red decimals of drum meters
+    // The last saved index of this meter: only numbers that can follow it are offered
     previousIndex: Long? = null,
     // The biggest plausible increase since the previous index
     maxJump: Long = 1000L
@@ -172,7 +187,7 @@ fun MeterScannerDialog(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                            Text("Permite Accesul la Cameră")
+                            Text("Permite accesul")
                         }
                     }
                 }
@@ -201,12 +216,17 @@ private fun CameraScannerContent(
     var cameraError by remember { mutableStateOf(false) }
     var showTips by remember { mutableStateOf(false) }
 
-    // The number in the editable field. It follows the best suggestion until the user types.
+    // The number in the editable field. It follows the best suggestion until the user touches it.
     var fieldText by remember { mutableStateOf("") }
     var userEdited by remember { mutableStateOf(false) }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val textRecognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+
+    // Where the preview and the framing box are on screen: the analysed image is cropped to
+    // exactly the box, so what the user aims at is what is read
+    val previewBounds = remember { AtomicReference<UiRect?>(null) }
+    val boxBounds = remember { AtomicReference<UiRect?>(null) }
 
     // What the latest frames contained; touched from the analyzer thread only
     val recentFrames = remember { mutableListOf<List<Detection>>() }
@@ -215,7 +235,7 @@ private fun CameraScannerContent(
 
     val best = suggestions.firstOrNull()
 
-    // Until the user types, the field shows the best suggestion
+    // Until the user touches the field, it shows the best suggestion
     LaunchedEffect(best?.value) {
         if (!userEdited && best != null) fieldText = best.display
     }
@@ -238,9 +258,11 @@ private fun CameraScannerContent(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Camera Preview
+        // Camera preview
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { previewBounds.set(it.boundsInWindow()) },
             factory = { ctx ->
                 val previewView = PreviewView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(
@@ -287,35 +309,56 @@ private fun CameraScannerContent(
                             .build()
 
                         val mainExecutor = ContextCompat.getMainExecutor(ctx)
+                        val minVotes = if (previousIndex != null) MIN_VOTES_WITH_PREVIOUS else MIN_VOTES_WITHOUT_PREVIOUS
                         imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                            processImageProxy(imageProxy, textRecognizer) { detections ->
+                            try {
+                                val detections = readFrame(
+                                    proxy = imageProxy,
+                                    recognizer = textRecognizer,
+                                    roi = regionOfInterest(previewBounds.get(), boxBounds.get())
+                                )
                                 val ranked = synchronized(recentFrames) {
                                     recentFrames.add(detections)
                                     if (recentFrames.size > RECENT_FRAMES) recentFrames.removeAt(0)
                                     IndexCandidatePicker.suggest(
                                         frames = recentFrames.toList(),
-                                        minVotes = MIN_FRAME_VOTES,
+                                        minVotes = minVotes,
                                         previousIndex = previousIndex,
                                         maxJump = maxJump
                                     )
                                 }
-                                // Compose state is updated on the main thread; an empty result keeps
-                                // the last good one so the screen does not flicker
-                                if (ranked.isNotEmpty()) {
-                                    mainExecutor.execute { suggestions = ranked }
-                                }
+                                // Compose state is updated on the main thread; once the user has
+                                // touched the result it is frozen so it does not change under them
+                                mainExecutor.execute { if (!userEdited) suggestions = ranked }
+                            } catch (e: Exception) {
+                                // A bad frame (or a recognizer closed meanwhile) is simply skipped
+                            } finally {
+                                imageProxy.close()
                             }
                         }
 
-                        cameraProvider.unbindAll()
-                        val camera = cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            CameraSelector.DEFAULT_BACK_CAMERA,
-                            preview,
-                            imageAnalysis
-                        )
-                        cameraControl = camera.cameraControl
-                        maxZoom = camera.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+                        // The preview and the analysis must show the same part of the picture,
+                        // otherwise the box on screen does not match what is read
+                        previewView.post {
+                            try {
+                                val group = UseCaseGroup.Builder()
+                                    .addUseCase(preview)
+                                    .addUseCase(imageAnalysis)
+                                    .apply { previewView.viewPort?.let { setViewPort(it) } }
+                                    .build()
+                                cameraProvider.unbindAll()
+                                val camera = cameraProvider.bindToLifecycle(
+                                    lifecycleOwner,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    group
+                                )
+                                cameraControl = camera.cameraControl
+                                maxZoom = camera.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                cameraError = true
+                            }
+                        }
                     } catch (e: Exception) {
                         e.printStackTrace()
                         cameraError = true
@@ -326,272 +369,239 @@ private fun CameraScannerContent(
             }
         )
 
-        // Overlay with scanning frame
+        // Top bar
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            ) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Închide", tint = Color.White)
+            }
+
+            IconButton(
+                onClick = {
+                    isTorchOn = !isTorchOn
+                    cameraControl?.enableTorch(isTorchOn)
+                },
+                modifier = Modifier.background(
+                    if (isTorchOn) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.5f),
+                    CircleShape
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.FlashlightOn,
+                    contentDescription = "Lanternă",
+                    tint = Color.White
+                )
+            }
+        }
+
+        // Framing box and zoom: the position is fixed, whatever the result card below does
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+                .align(Alignment.Center)
+                .offset(y = (-90).dp)
+                .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar
-            Row(
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxWidth(0.9f)
+                    .height(96.dp)
+                    .onGloballyPositioned { boxBounds.set(it.boundsInWindow()) }
+                    .border(BorderStroke(2.5.dp, MaterialTheme.colorScheme.primary), RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
             ) {
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                ) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Închide", tint = Color.White)
-                }
-
-                Text(
-                    text = "Scanare Contor",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
-
-                IconButton(
-                    onClick = {
-                        isTorchOn = !isTorchOn
-                        cameraControl?.enableTorch(isTorchOn)
-                    },
-                    modifier = Modifier.background(
-                        if (isTorchOn) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.5f),
-                        CircleShape
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FlashlightOn,
-                        contentDescription = "Lanternă",
-                        tint = Color.White
+                if (best != null) {
+                    Text(
+                        text = best.display,
+                        color = Color(0xFF69F0AE),
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
                     )
                 }
             }
 
-            // Central Guide Viewfinder + zoom
+            Spacer(modifier = Modifier.height(12.dp))
+
+            val steps = ZOOM_STEPS.filter { it <= maxZoom + 0.01f }
+            if (steps.size > 1) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (step in steps) {
+                        val selected = zoom == step
+                        Surface(
+                            modifier = Modifier.clickable {
+                                zoom = step
+                                cameraControl?.setZoomRatio(step)
+                            },
+                            shape = CircleShape,
+                            color = if (selected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.55f)
+                        ) {
+                            Text(
+                                text = "${step.toInt()}×",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Result card at the bottom
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(16.dp),
+            shape = RoundedCornerShape(22.dp),
+            color = Color.Black.copy(alpha = 0.8f)
+        ) {
             Column(
+                modifier = Modifier.padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .height(110.dp)
-                        .border(BorderStroke(2.5.dp, MaterialTheme.colorScheme.primary), RoundedCornerShape(12.dp))
-                        .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (best != null) {
-                        Text(
-                            text = best.display,
-                            color = if (best.plausible) Color.Green else Color(0xFFFFB74D),
-                            fontSize = 32.sp,
+                if (cameraError) {
+                    Text(
+                        text = "Camera nu poate fi deschisă acum. Închide scanerul și scrie indexul.",
+                        color = Color.White,
+                        fontSize = 13.sp
+                    )
+                    Button(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
+                        Text("Închide")
+                    }
+                } else if (best != null) {
+                    OutlinedTextField(
+                        value = fieldText,
+                        onValueChange = { input ->
+                            fieldText = input.filter { it.isDigit() }.take(9)
+                            userEdited = true
+                        },
+                        singleLine = true,
+                        label = { Text("Index detectat") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        textStyle = TextStyle(
+                            color = Color.White,
+                            fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
-                        )
-                    } else {
-                        Text(
-                            text = "Încadrează cifrele contorului aici",
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 13.sp
-                        )
-                    }
-                }
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
+                            focusedLabelColor = Color.White.copy(alpha = 0.8f),
+                            unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
+                            cursorColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                val steps = ZOOM_STEPS.filter { it <= maxZoom + 0.01f }
-                if (steps.size > 1) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (step in steps) {
-                            val selected = zoom == step
-                            Surface(
-                                modifier = Modifier.clickable {
-                                    zoom = step
-                                    cameraControl?.setZoomRatio(step)
-                                },
-                                shape = CircleShape,
-                                color = if (selected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.55f)
-                            ) {
-                                Text(
-                                    text = if (step == step.toInt().toFloat()) "${step.toInt()}×" else "$step×",
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                Text(
-                    text = if (previousIndex != null) {
-                        "Ultimul index: $previousIndex. Atinge ecranul ca să focalizezi."
-                    } else {
-                        "Atinge ecranul ca să focalizezi pe cifre."
-                    },
-                    color = Color.White.copy(alpha = 0.75f),
-                    fontSize = 12.sp
-                )
-            }
-
-            // Bottom Results Card
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 20.dp),
-                shape = RoundedCornerShape(16.dp),
-                color = Color.Black.copy(alpha = 0.78f)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (cameraError) {
-                        Text(
-                            text = "Camera nu poate fi deschisă acum (poate o folosește altă aplicație). Închide scanerul și scrie indexul manual.",
-                            color = Color.White,
-                            fontSize = 13.sp
-                        )
-                        Button(onClick = onDismiss, shape = RoundedCornerShape(10.dp)) {
-                            Text("Închide")
-                        }
-                    } else if (best != null) {
-                        Text(
-                            text = "Index detectat — poți corecta cifrele",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-
-                        OutlinedTextField(
-                            value = fieldText,
-                            onValueChange = { input ->
-                                fieldText = input.filter { it.isDigit() }.take(9)
-                                userEdited = true
-                            },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            textStyle = TextStyle(
-                                color = Color.White,
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
-                                cursorColor = Color.White
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // A number that does not follow the previous index is flagged, not hidden:
-                        // the user may know better than the app
-                        val typed = fieldText.toLongOrNull()
-                        val fitsPrevious = previousIndex == null || typed == null || typed >= previousIndex
-                        if (!fitsPrevious) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFFB74D),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Numărul e mai mic decât ultimul index ($previousIndex). Verifică cifrele.",
-                                    color = Color(0xFFFFB74D),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        } else if (!best.plausible && !userEdited) {
+                    // The user may type anything; a number below the last index is flagged
+                    val typed = fieldText.toLongOrNull()
+                    if (previousIndex != null && typed != null && typed < previousIndex) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFFFFB74D),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Nu pare să urmeze după ultimul index. Mai citește o dată sau corectează.",
+                                text = "Mai mic decât ultimul index ($previousIndex)",
                                 color = Color(0xFFFFB74D),
                                 fontSize = 12.sp
                             )
                         }
+                    }
 
-                        best.note?.let {
-                            if (!userEdited) {
-                                Text(text = it, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
-                            }
-                        }
-
-                        // The other candidates the camera considered
-                        if (suggestions.size > 1) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                for (suggestion in suggestions.take(4)) {
-                                    FilterChip(
-                                        selected = fieldText == suggestion.display,
-                                        onClick = {
-                                            fieldText = suggestion.display
-                                            userEdited = true
-                                        },
-                                        label = { Text(suggestion.display, fontFamily = FontFamily.Monospace) }
-                                    )
-                                }
-                            }
-                        }
-
+                    // Other numbers the camera considered, on one line
+                    if (suggestions.size > 1) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = onDismiss,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("Renunță", color = Color.White)
+                            for (suggestion in suggestions) {
+                                FilterChip(
+                                    selected = fieldText == suggestion.display,
+                                    onClick = {
+                                        fieldText = suggestion.display
+                                        userEdited = true
+                                    },
+                                    label = {
+                                        Text(
+                                            text = suggestion.display,
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                )
                             }
+                        }
+                    }
 
-                            Button(
-                                onClick = { if (fieldText.isNotEmpty()) onIndexSelected(fieldText) },
-                                enabled = fieldText.isNotEmpty(),
-                                modifier = Modifier.weight(1.5f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                            ) {
-                                Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Folosește indexul")
-                            }
-                        }
-                    } else {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp)
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Îndreaptă camera spre cadranul contorului...",
-                                color = Color.White,
-                                fontSize = 12.sp
-                            )
+                            Text("Renunță", color = Color.White, maxLines = 1)
                         }
-                        if (showTips) {
-                            Text(
-                                text = "Nu am citit nimic încă. Încearcă: apropie-te de cifre, ine telefonul drept, " +
-                                    "pornește lanterna dacă e întuneric, evită reflexiile, folosește zoom 2× sau 3×, " +
-                                    "atinge cifrele ca să focalizezi. Dacă nu merge, scrie indexul manual.",
-                                color = Color.White.copy(alpha = 0.75f),
-                                fontSize = 11.5.sp
-                            )
+
+                        Button(
+                            onClick = { if (fieldText.isNotEmpty()) onIndexSelected(fieldText) },
+                            enabled = fieldText.isNotEmpty(),
+                            modifier = Modifier.weight(1.4f),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text("Folosește", maxLines = 1, fontWeight = FontWeight.Bold)
                         }
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = if (previousIndex != null) {
+                                "Pune cifrele negre în chenar · ultimul: $previousIndex"
+                            } else {
+                                "Pune cifrele negre în chenar"
+                            },
+                            color = Color.White,
+                            fontSize = 13.sp
+                        )
+                    }
+                    if (showTips) {
+                        Text(
+                            text = "Apropie-te, atinge cifrele ca să focalizeze, folosește zoom 2×–3× sau lanterna. " +
+                                "Dacă nu merge, scrie indexul manual.",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }
@@ -599,72 +609,203 @@ private fun CameraScannerContent(
     }
 }
 
-/** Reads one camera frame and reports the numbers found in the aimed middle band of the picture. */
-@SuppressLint("UnsafeOptInUsageError")
-private fun processImageProxy(
-    imageProxy: ImageProxy,
-    recognizer: TextRecognizer,
-    onResult: (List<Detection>) -> Unit
-) {
-    val mediaImage = imageProxy.image
-    if (mediaImage == null) {
-        imageProxy.close()
-        return
-    }
-
-    val rotation = imageProxy.imageInfo.rotationDegrees
-    // Bounding boxes come back in the rotated picture, so width and height swap for 90/270
-    val frameWidth = if (rotation % 180 == 0) imageProxy.width else imageProxy.height
-    val frameHeight = if (rotation % 180 == 0) imageProxy.height else imageProxy.width
-
-    val inputImage = InputImage.fromMediaImage(mediaImage, rotation)
-    recognizer.process(inputImage)
-        .addOnSuccessListener { visionText ->
-            val detections = ArrayList<Detection>()
-            for (block in visionText.textBlocks) {
-                for (line in block.lines) {
-                    val box = line.boundingBox ?: continue
-                    val centerX = box.centerX().toFloat() / frameWidth
-                    val centerY = box.centerY().toFloat() / frameHeight
-                    if (centerX !in ROI_LEFT..ROI_RIGHT || centerY !in ROI_TOP..ROI_BOTTOM) continue
-
-                    // The index is printed in the biggest digits: their height ranks the candidates
-                    val height = box.height().toFloat() / frameHeight
-                    for (digits in digitStrings(line.text)) {
-                        detections.add(Detection(digits, height))
-                    }
-                }
-            }
-            onResult(detections)
-        }
-        .addOnCompleteListener {
-            imageProxy.close()
-        }
+/** The framing box as fractions (left, top, right, bottom) of the visible camera picture. */
+private fun regionOfInterest(preview: UiRect?, box: UiRect?): FloatArray {
+    if (preview == null || box == null || preview.width <= 0f || preview.height <= 0f) return DEFAULT_ROI
+    val left = ((box.left - preview.left) / preview.width).coerceIn(0f, 1f)
+    val top = ((box.top - preview.top) / preview.height).coerceIn(0f, 1f)
+    val right = ((box.right - preview.left) / preview.width).coerceIn(0f, 1f)
+    val bottom = ((box.bottom - preview.top) / preview.height).coerceIn(0f, 1f)
+    return if (right - left < 0.05f || bottom - top < 0.02f) DEFAULT_ROI else floatArrayOf(left, top, right, bottom)
 }
 
 /**
- * The numbers in one line of recognised text. A dot or comma splits a token, so "2899.123" gives
- * the index 2899 and the red decimals 123 separately, and digits read one by one ("2 8 9 9")
- * are also offered glued together.
+ * Reads one camera frame: crops it to the framing box, cuts off the red decimal drums, and reads
+ * two enhanced versions of the crop (contrast, and inverted for light digits on dark drums).
+ * Runs on the analyzer thread, so it may wait for the recognizer.
  */
-private fun digitStrings(text: String): List<String> {
-    val tokens = text.trim().split(Regex("[\\s.,:;]+")).filter { it.isNotEmpty() }
-    val cleaned = tokens.map { cleanToken(it) }
+@SuppressLint("UnsafeOptInUsageError")
+private fun readFrame(proxy: ImageProxy, recognizer: TextRecognizer, roi: FloatArray): List<Detection> {
+    var visible = proxy.toBitmap()
 
-    val result = ArrayList<String>()
-    for (digits in cleaned) {
-        if (digits != null && digits.length >= IndexCandidatePicker.MIN_DIGITS) result.add(digits)
+    // With a view port the frame carries the crop that matches the preview; apply it unless the
+    // conversion has already done so
+    val crop = proxy.cropRect
+    val coversAll = crop.width() >= proxy.width && crop.height() >= proxy.height
+    val alreadyCropped = visible.width == crop.width() && visible.height == crop.height()
+    if (!coversAll && !alreadyCropped) {
+        val l = crop.left.coerceIn(0, visible.width - 2)
+        val t = crop.top.coerceIn(0, visible.height - 2)
+        val w = min(crop.width(), visible.width - l).coerceAtLeast(2)
+        val h = min(crop.height(), visible.height - t).coerceAtLeast(2)
+        visible = Bitmap.createBitmap(visible, l, t, w, h)
     }
 
-    if (tokens.size in IndexCandidatePicker.MIN_DIGITS..8 && cleaned.all { it != null && it.length == 1 }) {
-        result.add(cleaned.joinToString("") { it.orEmpty() })
+    val rotation = proxy.imageInfo.rotationDegrees
+    val upright = if (rotation == 0) {
+        visible
+    } else {
+        Bitmap.createBitmap(
+            visible, 0, 0, visible.width, visible.height,
+            Matrix().apply { postRotate(rotation.toFloat()) }, true
+        )
+    }
+
+    val left = (roi[0] * upright.width).toInt().coerceIn(0, upright.width - 2)
+    val top = (roi[1] * upright.height).toInt().coerceIn(0, upright.height - 2)
+    val width = ((roi[2] - roi[0]) * upright.width).toInt().coerceIn(2, upright.width - left)
+    val height = ((roi[3] - roi[1]) * upright.height).toInt().coerceIn(2, upright.height - top)
+    var region = Bitmap.createBitmap(upright, left, top, width, height)
+
+    region = cutRedDecimals(region)
+
+    // Small crops are enlarged: the recognizer reads small characters badly
+    if (region.width in 2..899) {
+        val scaledHeight = max(2, (region.height * 900f / region.width).toInt())
+        region = Bitmap.createScaledBitmap(region, 900, scaledHeight, true)
+    }
+
+    val detections = ArrayList<Detection>()
+    for (negative in listOf(false, true)) {
+        val enhanced = enhance(region, negative)
+        val text = Tasks.await(recognizer.process(InputImage.fromBitmap(enhanced, 0)))
+        detections.addAll(detectionsFrom(text, enhanced.height))
+    }
+    return detections
+}
+
+/**
+ * Drum meters show the red decimals after the index. Their drums are red, so the crop is cut at
+ * the first wide band of red columns and only the black drums (the index) are read.
+ */
+private fun cutRedDecimals(src: Bitmap): Bitmap {
+    val smallWidth = 160
+    val smallHeight = max(1, (smallWidth.toFloat() * src.height / src.width).toInt())
+    val small = Bitmap.createScaledBitmap(src, smallWidth, smallHeight, true)
+    val pixels = IntArray(smallWidth * smallHeight)
+    small.getPixels(pixels, 0, smallWidth, 0, 0, smallWidth, smallHeight)
+
+    val redColumn = BooleanArray(smallWidth)
+    for (x in 0 until smallWidth) {
+        var red = 0
+        for (y in 0 until smallHeight) {
+            val c = pixels[y * smallWidth + x]
+            val r = (c shr 16) and 0xFF
+            val g = (c shr 8) and 0xFF
+            val b = c and 0xFF
+            if (r > 110 && r > g * 1.5f && r > b * 1.5f) red++
+        }
+        redColumn[x] = red > smallHeight * 0.2f
+    }
+
+    // The red drums are on the right: look for a run of red columns, at least 6% of the width
+    val minRun = (smallWidth * 0.06f).toInt()
+    var run = 0
+    var runStart = -1
+    for (x in (smallWidth * 0.3f).toInt() until smallWidth) {
+        if (redColumn[x]) {
+            if (run == 0) runStart = x
+            run++
+            if (run >= minRun) {
+                val cutX = (((runStart - 1).coerceAtLeast(0)).toFloat() / smallWidth * src.width).toInt()
+                // Keep at least 15% of the crop: a tiny remainder means the red was a false alarm
+                if (cutX < src.width * 0.15f) return src
+                return Bitmap.createBitmap(src, 0, 0, cutX, src.height)
+            }
+        } else {
+            run = 0
+        }
+    }
+    return src
+}
+
+/** Grey, stronger contrast, optionally inverted (the recognizer prefers dark text on light). */
+private fun enhance(src: Bitmap, negative: Boolean): Bitmap {
+    val contrast = 1.6f
+    val sign = if (negative) -contrast else contrast
+    val translate = if (negative) 128f * contrast + 127f else 128f * (1f - contrast)
+    val matrix = ColorMatrix().apply { setSaturation(0f) }
+    matrix.postConcat(
+        ColorMatrix(
+            floatArrayOf(
+                sign, 0f, 0f, 0f, translate,
+                0f, sign, 0f, 0f, translate,
+                0f, 0f, sign, 0f, translate,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+    )
+    val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+    val paint = Paint().apply { colorFilter = ColorMatrixColorFilter(matrix) }
+    Canvas(out).drawBitmap(src, 0f, 0f, paint)
+    return out
+}
+
+private data class Piece(val digits: String, val box: Rect)
+
+/**
+ * The numbers found in a crop. A drum meter is often read digit by digit, so digits that are on
+ * the same row and close to each other are glued together, left to right.
+ */
+private fun detectionsFrom(text: VisionText, cropHeight: Int): List<Detection> {
+    val pieces = ArrayList<Piece>()
+    for (block in text.textBlocks) {
+        for (line in block.lines) {
+            for (element in line.elements) {
+                val box = element.boundingBox ?: continue
+                val digits = cleanToken(element.text) ?: continue
+                pieces.add(Piece(digits, box))
+            }
+        }
+    }
+    if (pieces.isEmpty()) return emptyList()
+
+    // Group into rows by vertical position
+    val rows = ArrayList<MutableList<Piece>>()
+    for (piece in pieces.sortedBy { it.box.centerY() }) {
+        val row = rows.lastOrNull()
+        if (row != null && kotlin.math.abs(piece.box.centerY() - row.map { it.box.centerY() }.average()) < piece.box.height() * 0.6) {
+            row.add(piece)
+        } else {
+            rows.add(mutableListOf(piece))
+        }
+    }
+
+    val result = ArrayList<Detection>()
+    for (row in rows) {
+        val ordered = row.sortedBy { it.box.left }
+        val digitHeight = ordered.map { it.box.height() }.average().toFloat()
+        val ratio = (digitHeight / cropHeight).coerceAtMost(1f)
+
+        // Split the row into runs where the gap is small compared with the digit height
+        val runs = ArrayList<MutableList<Piece>>()
+        for (piece in ordered) {
+            val run = runs.lastOrNull()
+            if (run != null && piece.box.left - run.last().box.right <= digitHeight * 1.5f) {
+                run.add(piece)
+            } else {
+                runs.add(mutableListOf(piece))
+            }
+        }
+
+        for (run in runs) {
+            val glued = run.joinToString("") { it.digits }
+            if (glued.length in IndexCandidatePicker.MIN_DIGITS..8) result.add(Detection(glued, ratio))
+            if (run.size > 1) {
+                for (piece in run) {
+                    if (piece.digits.length in IndexCandidatePicker.MIN_DIGITS..8) {
+                        result.add(Detection(piece.digits, ratio))
+                    }
+                }
+            }
+        }
     }
     return result
 }
 
 /**
- * Turns a recognised token into digits, fixing the usual misreads (O for 0, l for 1, S for 5, ...).
- * A token that is mostly letters is not a number and gives null.
+ * Turns a recognised word into digits, fixing the usual misreads (O for 0, l for 1, S for 5, ...).
+ * A word that is mostly letters or symbols is not a number and gives null.
  */
 private fun cleanToken(token: String): String? {
     val digitCount = token.count { it.isDigit() }
